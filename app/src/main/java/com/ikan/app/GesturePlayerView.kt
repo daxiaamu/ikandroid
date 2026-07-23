@@ -7,10 +7,13 @@ import android.graphics.Rect
 import android.media.AudioManager
 import android.provider.Settings
 import android.util.AttributeSet
+import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.media3.common.C
 import androidx.media3.ui.PlayerView
 import kotlin.math.abs
@@ -38,8 +41,52 @@ class GesturePlayerView @JvmOverloads constructor(
     private var targetPosition = 0L
     private var nativeProgressGesture = false
     private val clearFeedback = Runnable { onGestureFeedback?.invoke(null) }
+    private var onBackAction: (() -> Unit)? = null
+    private var onCastAction: (() -> Unit)? = null
+    private var onSettingsAction: (() -> Unit)? = null
+    private var onCacheAction: (() -> Unit)? = null
+    private var onPipAction: (() -> Unit)? = null
+    private var onFullscreenAction: (() -> Unit)? = null
+    private var actionTargetsVisible = false
+    private var actionTargetsFullscreen = false
+    private var pendingAction: (() -> Unit)? = null
+    private val topBackHitTarget by lazy {
+        actionHitTarget("返回") { onBackAction?.invoke() }
+    }
+    private val topActionsHitTarget by lazy {
+        LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(actionHitTarget("DLNA 投屏") { onCastAction?.invoke() })
+            addView(actionHitTarget("速度与音轨") { onSettingsAction?.invoke() })
+        }
+    }
+    private val bottomActionsHitTarget by lazy {
+        LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(actionHitTarget("缓存") { onCacheAction?.invoke() })
+            addView(actionHitTarget("画中画") { onPipAction?.invoke() })
+            addView(actionHitTarget("横竖屏切换") { onFullscreenAction?.invoke() })
+        }
+    }
+    private var actionTargetsAttached = false
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            resolveAction(event.x, event.y)?.let {
+                pendingAction = it
+                return true
+            }
+        } else {
+            pendingAction?.let { action ->
+                if (event.actionMasked == MotionEvent.ACTION_UP) action()
+                if (event.actionMasked == MotionEvent.ACTION_UP ||
+                    event.actionMasked == MotionEvent.ACTION_CANCEL
+                ) {
+                    pendingAction = null
+                }
+                return true
+            }
+        }
         if (event.actionMasked != MotionEvent.ACTION_DOWN && nativeProgressGesture) {
             val handled = super.dispatchTouchEvent(event)
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
@@ -107,6 +154,76 @@ class GesturePlayerView @JvmOverloads constructor(
             }
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    fun configureActionHitTargets(
+        visible: Boolean,
+        fullscreen: Boolean,
+        onBack: () -> Unit,
+        onCast: () -> Unit,
+        onSettings: () -> Unit,
+        onCache: () -> Unit,
+        onPip: () -> Unit,
+        onFullscreen: () -> Unit,
+    ) {
+        onBackAction = onBack
+        onCastAction = onCast
+        onSettingsAction = onSettings
+        onCacheAction = onCache
+        onPipAction = onPip
+        onFullscreenAction = onFullscreen
+        actionTargetsVisible = visible
+        actionTargetsFullscreen = fullscreen
+        if (!actionTargetsAttached) {
+            actionTargetsAttached = true
+            val button = dp(48)
+            addView(
+                topBackHitTarget,
+                LayoutParams(button, button, Gravity.TOP or Gravity.START),
+            )
+            addView(
+                topActionsHitTarget,
+                LayoutParams(button * 2, button, Gravity.TOP or Gravity.END),
+            )
+            addView(
+                bottomActionsHitTarget,
+                LayoutParams(button * 3, button, Gravity.BOTTOM or Gravity.END),
+            )
+        }
+        topBackHitTarget.visibility = if (visible && fullscreen) View.VISIBLE else View.GONE
+        topActionsHitTarget.visibility = if (visible) View.VISIBLE else View.GONE
+        bottomActionsHitTarget.visibility = if (visible) View.VISIBLE else View.GONE
+        bringChildToFront(topBackHitTarget)
+        bringChildToFront(topActionsHitTarget)
+        bringChildToFront(bottomActionsHitTarget)
+    }
+
+    private fun actionHitTarget(description: String, action: () -> Unit): View =
+        View(context).apply {
+            contentDescription = description
+            isClickable = true
+            isFocusable = true
+            alpha = 0.01f
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
+            setOnClickListener { action() }
+        }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
+
+    private fun resolveAction(x: Float, y: Float): (() -> Unit)? {
+        if (!actionTargetsVisible) return null
+        val button = dp(48).toFloat()
+        if (y <= button) {
+            if (actionTargetsFullscreen && x <= button) return onBackAction
+            if (x >= width - button) return onSettingsAction
+            if (x >= width - button * 2) return onCastAction
+        }
+        if (y >= height - button) {
+            if (x >= width - button) return onFullscreenAction
+            if (x >= width - button * 2) return onPipAction
+            if (x >= width - button * 3) return onCacheAction
+        }
+        return null
     }
 
     private fun adjustBrightness(dy: Float) {

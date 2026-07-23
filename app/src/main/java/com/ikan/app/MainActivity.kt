@@ -1,9 +1,11 @@
 package com.ikan.app
 
+import android.Manifest
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.net.Uri
@@ -22,12 +24,15 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateBounds
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +53,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
@@ -65,7 +71,10 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Fullscreen
@@ -76,6 +85,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
@@ -96,6 +106,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -106,9 +117,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -116,8 +130,10 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.movableContentWithReceiverOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -127,6 +143,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -134,9 +151,11 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
@@ -154,11 +173,14 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.offline.Download
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
@@ -187,7 +209,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.setBackgroundDrawableResource(android.R.color.black)
         enableEdgeToEdge()
         setContent {
             val app = application as IKanApplication
@@ -271,10 +292,28 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     HOME("首页", Icons.Default.Home),
     FAVORITES("收藏", Icons.Default.Favorite),
     HISTORY("播放历史", Icons.Default.History),
+    CACHE("缓存", Icons.Default.Download),
     SETTINGS("设置", Icons.Default.Settings),
 }
 
 private data class Playing(val line: PlayLine, val episode: PlayEpisode, val startPosition: Long = 0)
+
+private data class PlayerPresentation(
+    val title: String,
+    val playing: Playing?,
+    val fullscreen: Boolean,
+    val isPip: Boolean,
+    val isPipReturning: Boolean,
+    val enterPip: () -> Unit,
+    val configureAutoPip: (Boolean) -> Unit,
+    val onBack: () -> Unit,
+    val onFullscreenToggle: () -> Unit,
+    val cachedEpisode: CachedEpisode?,
+    val onCacheEpisode: () -> Unit,
+    val onCacheLine: () -> Unit,
+    val onPlaybackEnded: () -> Unit,
+    val onProgress: (Long, Long) -> Unit,
+)
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -288,6 +327,7 @@ private fun IKanApp(
     var tab by rememberSaveable { mutableStateOf(MainTab.HOME) }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     var detailVideo by remember { mutableStateOf<Video?>(null) }
+    var requestedCachedEpisode by remember { mutableStateOf<CachedEpisode?>(null) }
     var frozenHistory by remember { mutableStateOf<List<LibraryEntity>?>(null) }
     val appScope = rememberCoroutineScope()
     val homeListState = rememberLazyListState()
@@ -297,9 +337,17 @@ private fun IKanApp(
     val historyGridState = rememberLazyGridState()
 
     fun openVideo(video: Video) {
+        requestedCachedEpisode = null
         detailVideo = video
         detailId = video.id
         viewModel.loadDetail(video.id)
+    }
+
+    fun openCachedEpisode(item: CachedEpisode) {
+        requestedCachedEpisode = item
+        detailVideo = Video(item.videoId, item.title, item.poster)
+        detailId = item.videoId
+        viewModel.loadDetail(item.videoId)
     }
 
     SharedTransitionLayout {
@@ -338,6 +386,7 @@ private fun IKanApp(
                 DetailRoute(
                     videoId = id,
                     sourceVideo = detailVideo,
+                    requestedCachedEpisode = requestedCachedEpisode,
                     posterModifier = sharedPosterModifier,
                     titleModifier = sharedTitleModifier,
                     viewModel = viewModel,
@@ -354,6 +403,7 @@ private fun IKanApp(
                             if (detailId == null) {
                                 viewModel.closeDetail()
                                 frozenHistory = null
+                                requestedCachedEpisode = null
                             }
                         }
                     },
@@ -391,6 +441,7 @@ private fun IKanApp(
                         }
                         MainTab.HISTORY -> {
                             val history by viewModel.history.collectAsStateWithLifecycle()
+                            val downloads by viewModel.downloads.collectAsStateWithLifecycle()
                             LibraryScreen(
                                 title = "播放历史",
                                 emptyText = "还没有播放记录",
@@ -405,6 +456,19 @@ private fun IKanApp(
                                 titleModifier = sharedTitleModifier,
                                 gridState = historyGridState,
                                 onClear = viewModel::clearHistory,
+                                cachedVideoIds = downloads.mapTo(mutableSetOf()) { it.videoId },
+                            )
+                        }
+                        MainTab.CACHE -> {
+                            val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+                            CacheScreen(
+                                downloads = downloads,
+                                modifier = Modifier.fillMaxSize(),
+                                navigationPadding = padding,
+                                onPlay = ::openCachedEpisode,
+                                onDelete = viewModel::removeDownload,
+                                onSetPaused = viewModel::setDownloadPaused,
+                                onClear = viewModel::clearDownloads,
                             )
                         }
                         MainTab.SETTINGS -> SettingsScreen(
@@ -427,7 +491,7 @@ private fun MainTabs(
     content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val wide = maxWidth >= 840.dp
+        val wide = maxWidth >= 600.dp
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail(navigationModifier.fillMaxHeight().navigationBarsPadding().statusBarsPadding()) {
@@ -491,15 +555,41 @@ private fun HomeScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(padding).statusBarsPadding()) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(padding).statusBarsPadding()) {
+        val medium = maxWidth >= 600.dp
+        val expanded = maxWidth >= 840.dp
+        val horizontalPadding = when {
+            expanded -> 32.dp
+            medium -> 24.dp
+            else -> 16.dp
+        }
+        val cardWidth = when {
+            expanded -> 160.dp
+            medium -> 144.dp
+            else -> 116.dp
+        }
+        val gridMinWidth = when {
+            expanded -> 160.dp
+            medium -> 144.dp
+            else -> 112.dp
+        }
+
+        Column(
+            Modifier
+                .widthIn(max = 1400.dp)
+                .fillMaxSize()
+                .align(Alignment.TopCenter),
+        ) {
         Text("爱看", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp))
+            modifier = Modifier.padding(start = horizontalPadding, top = 8.dp, bottom = 8.dp))
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
             modifier = Modifier
+                .widthIn(max = 760.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+                .align(Alignment.CenterHorizontally)
+                .padding(horizontal = horizontalPadding)
                 .onFocusChanged { searchFocused = it.isFocused }
                 .onPreviewKeyEvent { event ->
                     if (event.key == Key.Enter && event.type == KeyEventType.KeyUp) {
@@ -519,7 +609,13 @@ private fun HomeScreen(
             },
         )
         if (searchFocused && searchHistory.isNotEmpty()) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Column(
+                Modifier
+                    .widthIn(max = 760.dp)
+                    .fillMaxWidth()
+                    .align(Alignment.CenterHorizontally)
+                    .padding(horizontal = horizontalPadding, vertical = 8.dp),
+            ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("搜索历史", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                     TextButton(onClick = viewModel::clearSearchHistory) { Text("清除") }
@@ -536,7 +632,7 @@ private fun HomeScreen(
         }
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(HomeCategory.entries) { item ->
@@ -555,10 +651,14 @@ private fun HomeScreen(
             listState = listState,
             gridState = gridState,
             sectionStates = sectionStates,
+            cardWidth = cardWidth,
+            gridMinWidth = gridMinWidth,
+            horizontalPadding = horizontalPadding,
             onFilter = viewModel::loadPath,
             onNext = { path -> viewModel.loadPath(path, catalog.page?.title ?: category.label) },
             onRetry = { viewModel.loadCategory(category) },
         )
+        }
     }
 }
 
@@ -571,6 +671,9 @@ private fun CatalogContent(
     listState: LazyListState,
     gridState: LazyGridState,
     sectionStates: MutableMap<String, LazyListState>,
+    cardWidth: androidx.compose.ui.unit.Dp,
+    gridMinWidth: androidx.compose.ui.unit.Dp,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
     onFilter: (String, String) -> Unit,
     onNext: (String) -> Unit,
     onRetry: () -> Unit,
@@ -588,11 +691,11 @@ private fun CatalogContent(
                             val sectionKey = "${page.title}:$index:${section.title}"
                             LazyRow(
                                 state = sectionStates.getOrPut(sectionKey) { LazyListState() },
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 items(section.videos, key = { it.id }) {
-                                    VideoCard(it, onVideo, Modifier.width(116.dp), posterModifier, titleModifier)
+                                    VideoCard(it, onVideo, Modifier.width(cardWidth), posterModifier, titleModifier)
                                 }
                             }
                         }
@@ -600,7 +703,18 @@ private fun CatalogContent(
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             } else {
-                CatalogGrid(page, state.loading, onVideo, posterModifier, titleModifier, gridState, onFilter, onNext)
+                CatalogGrid(
+                    page,
+                    state.loading,
+                    onVideo,
+                    posterModifier,
+                    titleModifier,
+                    gridState,
+                    gridMinWidth,
+                    horizontalPadding,
+                    onFilter,
+                    onNext,
+                )
             }
         }
     }
@@ -614,13 +728,15 @@ private fun CatalogGrid(
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
     gridState: LazyGridState,
+    gridMinWidth: androidx.compose.ui.unit.Dp,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
     onFilter: (String, String) -> Unit,
     onNext: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         if (page.filters.isNotEmpty()) {
             LazyRow(
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(page.filters) { filter ->
@@ -633,10 +749,10 @@ private fun CatalogGrid(
             }
         }
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(112.dp),
+            columns = GridCells.Adaptive(gridMinWidth),
             state = gridState,
             modifier = Modifier.weight(1f),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -724,6 +840,7 @@ private fun VideoCard(
 private fun DetailRoute(
     videoId: String,
     sourceVideo: Video?,
+    requestedCachedEpisode: CachedEpisode?,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
     viewModel: MainViewModel,
@@ -735,16 +852,25 @@ private fun DetailRoute(
 ) {
     val state by viewModel.detail.collectAsStateWithLifecycle()
     val activity = LocalContext.current as MainActivity
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    var playing by remember(state.detail?.video?.id) { mutableStateOf<Playing?>(null) }
-    var autoResumed by remember(state.detail?.video?.id) { mutableStateOf(false) }
-    var enterTransitionSettled by remember(videoId) { mutableStateOf(false) }
-    val player = remember(videoId) { activity.obtainPlaybackPlayer() }
-
-    LaunchedEffect(videoId) {
-        delay(340)
-        enterTransitionSettled = true
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val tabletWindow = configuration.smallestScreenWidthDp >= 600
+    var playing by remember(videoId) {
+        mutableStateOf(
+            requestedCachedEpisode?.let { cached ->
+                val episode = PlayEpisode(cached.episodeName, cached.url)
+                Playing(
+                    PlayLine(cached.lineId, cached.lineName, listOf(episode)),
+                    episode,
+                    0,
+                )
+            },
+        )
     }
+    var autoResumed by remember(videoId) { mutableStateOf(false) }
+    var explicitFullscreen by rememberSaveable(videoId) { mutableStateOf(false) }
+    val player = remember(videoId) { activity.obtainPlaybackPlayer() }
+    val fullscreen = explicitFullscreen || (isLandscape && !tabletWindow)
 
     DisposableEffect(player) {
         onDispose {
@@ -754,12 +880,19 @@ private fun DetailRoute(
         }
     }
 
-    LaunchedEffect(state.detail, state.resume, enterTransitionSettled) {
-        if (!enterTransitionSettled) return@LaunchedEffect
+    LaunchedEffect(state.detail, state.resume, requestedCachedEpisode) {
         val detail = state.detail ?: return@LaunchedEffect
         if (!autoResumed) {
+            val requested = requestedCachedEpisode
             val resume = state.resume
-            if (resume?.streamUrl != null) {
+            if (requested != null) {
+                val line = detail.lines.firstOrNull { line ->
+                    line.id == requested.lineId || line.episodes.any { it.url == requested.url }
+                } ?: PlayLine(requested.lineId, requested.lineName, emptyList())
+                val episode = line.episodes.firstOrNull { it.url == requested.url }
+                    ?: PlayEpisode(requested.episodeName, requested.url)
+                playing = Playing(line, episode, 0)
+            } else if (resume?.streamUrl != null) {
                 val line = detail.lines.firstOrNull { it.id == resume.lineId }
                     ?: PlayLine(resume.lineId.orEmpty(), "上次线路", emptyList())
                 val episode = line.episodes.firstOrNull { it.url == resume.streamUrl }
@@ -777,6 +910,54 @@ private fun DetailRoute(
     }
 
     val activePlaying = playing
+    val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+    val cachedEpisode = activePlaying?.episode?.url?.let { url ->
+        downloads.firstOrNull { it.url == url }
+    }
+
+    fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                activity,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                1202,
+            )
+        }
+    }
+
+    fun cacheCurrentEpisode() {
+        val current = activePlaying ?: return
+        requestNotificationPermission()
+        viewModel.cacheEpisode(current.line, current.episode)
+        Toast.makeText(activity, "已加入后台缓存", Toast.LENGTH_SHORT).show()
+    }
+
+    fun cacheCurrentLine() {
+        val current = activePlaying ?: return
+        requestNotificationPermission()
+        viewModel.cacheLine(current.line)
+        Toast.makeText(activity, "已加入全集缓存，共 ${current.line.episodes.size} 集", Toast.LENGTH_SHORT).show()
+    }
+
+    fun playNextEpisode() {
+        val current = activePlaying ?: return
+        val currentIndex = current.line.episodes.indexOfFirst { it.url == current.episode.url }
+        val next = current.line.episodes.getOrNull(currentIndex + 1) ?: return
+        val duration = player.duration.takeUnless { it == C.TIME_UNSET || it < 0 } ?: 0L
+        viewModel.recordPlayback(
+            current.line.id,
+            current.episode.name,
+            current.episode.url,
+            duration,
+            duration,
+        )
+        playing = Playing(current.line, next, 0)
+        viewModel.recordPlayback(current.line.id, next.name, next.url, 0, 0)
+    }
+
     fun leaveDetail() {
         activePlaying?.let { current ->
             val position = if (player.currentMediaItem != null) {
@@ -798,9 +979,32 @@ private fun DetailRoute(
         onBack()
     }
 
+    fun leaveFullscreen() {
+        if (tabletWindow) {
+            // Establish the final inset geometry before Lookahead starts moving the player. This
+            // keeps resize and translation in one continuous bounds animation.
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .show(WindowInsetsCompat.Type.systemBars())
+            activity.window.decorView.postOnAnimation { explicitFullscreen = false }
+        } else {
+            explicitFullscreen = false
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    fun toggleFullscreen() {
+        if (fullscreen) {
+            leaveFullscreen()
+        } else {
+            explicitFullscreen = true
+            if (!isLandscape) {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
+        }
+    }
+
     BackHandler {
-        if (isLandscape) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        else leaveDetail()
+        if (fullscreen) leaveFullscreen() else leaveDetail()
     }
 
     LaunchedEffect(player, activePlaying?.episode?.url) {
@@ -821,46 +1025,82 @@ private fun DetailRoute(
             player.playWhenReady = true
         }
     }
-    if (activePlaying != null && state.detail != null && isLandscape) {
-        NativePlayer(
-            player = player,
-            title = state.detail!!.video.title,
+    val playerPresentation = rememberUpdatedState(
+        PlayerPresentation(
+            title = state.detail?.video?.title ?: sourceVideo?.title ?: "影片详情",
             playing = activePlaying,
-            fullscreen = true,
-            modifier = Modifier.fillMaxSize(),
+            fullscreen = fullscreen,
             isPip = isPip,
             isPipReturning = isPipReturning,
             enterPip = enterPip,
             configureAutoPip = configureAutoPip,
-            onBack = { activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT },
+            onBack = ::leaveFullscreen,
+            onFullscreenToggle = ::toggleFullscreen,
+            cachedEpisode = cachedEpisode,
+            onCacheEpisode = ::cacheCurrentEpisode,
+            onCacheLine = ::cacheCurrentLine,
+            onPlaybackEnded = ::playNextEpisode,
             onProgress = { position, duration ->
-                playing = activePlaying.copy(startPosition = position)
-                viewModel.recordPlayback(
-                    activePlaying.line.id,
-                    activePlaying.episode.name,
-                    activePlaying.episode.url,
-                    position,
-                    duration,
-                )
+                activePlaying?.let { current ->
+                    playing = current.copy(startPosition = position)
+                    viewModel.recordPlayback(
+                        current.line.id,
+                        current.episode.name,
+                        current.episode.url,
+                        position,
+                        duration,
+                    )
+                }
             },
-        )
-        return
+        ),
+    )
+    val movablePlayer = remember(player) {
+        movableContentWithReceiverOf<LookaheadScope> {
+            val presentation = playerPresentation.value
+            NativePlayer(
+                player = player,
+                title = presentation.title,
+                playing = presentation.playing,
+                fullscreen = presentation.fullscreen,
+                modifier = Modifier
+                    .animateBounds(
+                        lookaheadScope = this@movableContentWithReceiverOf,
+                        boundsTransform = { _, _ -> tween(360) },
+                    )
+                    .fillMaxSize(),
+                isPip = presentation.isPip,
+                isPipReturning = presentation.isPipReturning,
+                enterPip = presentation.enterPip,
+                configureAutoPip = presentation.configureAutoPip,
+                onBack = presentation.onBack,
+                onFullscreenToggle = presentation.onFullscreenToggle,
+                cachedEpisode = presentation.cachedEpisode,
+                onCacheEpisode = presentation.onCacheEpisode,
+                onCacheLine = presentation.onCacheLine,
+                onPlaybackEnded = presentation.onPlaybackEnded,
+                onProgress = presentation.onProgress,
+            )
+        }
     }
 
-    Scaffold(
+    LookaheadScope {
+        if (fullscreen) {
+            Box(Modifier.fillMaxSize()) { movablePlayer() }
+            return@LookaheadScope
+        }
+        Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        if (enterTransitionSettled) state.detail?.video?.title ?: sourceVideo?.title ?: "影片详情"
-                        else sourceVideo?.title ?: "影片详情",
+                        state.detail?.video?.title ?: sourceVideo?.title ?: "影片详情",
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = ::leaveDetail) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
                 actions = {
-                    if (enterTransitionSettled && state.detail != null) IconButton(onClick = {
+                    if (state.detail != null) IconButton(onClick = {
                         viewModel.toggleFavorite { added ->
                             Toast.makeText(activity, if (added) "已收藏" else "已取消收藏", Toast.LENGTH_SHORT).show()
                         }
@@ -875,19 +1115,11 @@ private fun DetailRoute(
         },
     ) { padding ->
         when {
-            !enterTransitionSettled || state.loading -> {
-                Column(Modifier.fillMaxSize().padding(padding)) {
-                    // Reserve the final player bounds immediately so shared poster/title targets
-                    // never move when detail data and the autoplay item arrive on later frames.
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .background(androidx.compose.ui.graphics.Color.Black),
-                    )
+            state.loading -> {
+                val loadingInfo: @Composable (Modifier) -> Unit = { modifier ->
                     if (sourceVideo != null) {
                         Row(
-                            modifier = Modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp),
+                            modifier = modifier.padding(start = 16.dp, top = 14.dp, end = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalAlignment = Alignment.Top,
                         ) {
@@ -911,126 +1143,182 @@ private fun DetailRoute(
                             }
                         }
                     } else {
-                        CenterLoading(Modifier.weight(1f))
+                        CenterLoading(modifier)
+                    }
+                }
+                // Use the same bounds as the loaded layout so neither the player nor the shared
+                // poster/title jumps when the asynchronous detail response arrives.
+                if (tabletWindow && isLandscape) {
+                    Row(
+                        Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Box(Modifier.weight(1.65f).aspectRatio(16f / 9f)) { movablePlayer() }
+                        loadingInfo(Modifier.weight(1f).fillMaxHeight())
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize().padding(padding)) {
+                        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) { movablePlayer() }
+                        loadingInfo(Modifier.fillMaxWidth().weight(1f))
                     }
                 }
             }
-            state.error != null -> ErrorState(state.error!!, { viewModel.loadDetail(videoId) }, Modifier.padding(padding))
+            state.error != null -> {
+                if (activePlaying != null) {
+                    if (tabletWindow && isLandscape) {
+                        Row(
+                            Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(24.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Box(Modifier.weight(1.65f).aspectRatio(16f / 9f)) { movablePlayer() }
+                            ErrorState(
+                                "正在播放已缓存内容\n${state.error}",
+                                { viewModel.loadDetail(videoId) },
+                                Modifier.weight(1f).fillMaxHeight(),
+                            )
+                        }
+                    } else {
+                        Column(Modifier.fillMaxSize().padding(padding)) {
+                            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) { movablePlayer() }
+                            ErrorState(
+                                "正在播放已缓存内容\n${state.error}",
+                                { viewModel.loadDetail(videoId) },
+                                Modifier.fillMaxWidth().weight(1f),
+                            )
+                        }
+                    }
+                } else {
+                    ErrorState(state.error!!, { viewModel.loadDetail(videoId) }, Modifier.padding(padding))
+                }
+            }
             state.detail != null -> {
                 val detail = state.detail!!
                 val posterVideo = sourceVideo ?: detail.video
-                Column(Modifier.fillMaxSize().padding(padding)) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .background(androidx.compose.ui.graphics.Color.Black),
+                fun selectEpisode(line: PlayLine, episode: PlayEpisode) {
+                    val current = activePlaying
+                    val currentIndex = current?.line?.episodes?.indexOfFirst {
+                        it.url == current.episode.url
+                    } ?: -1
+                    val targetIndex = line.episodes.indexOfFirst { it.url == episode.url }
+                    val sameEpisode = current != null && (
+                        current.episode.name == episode.name ||
+                            (currentIndex >= 0 && currentIndex == targetIndex &&
+                                current.line.episodes.size == line.episodes.size)
+                        )
+                    val resumePosition = if (sameEpisode) {
+                        player.currentPosition.coerceAtLeast(0L)
+                    } else {
+                        0L
+                    }
+                    playing = Playing(line, episode, resumePosition)
+                }
+
+                if (tabletWindow && isLandscape) {
+                    Row(
+                        Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        activePlaying?.let { current ->
-                            NativePlayer(
-                                player = player,
-                                title = detail.video.title,
-                                playing = current,
-                                fullscreen = false,
-                                modifier = Modifier.fillMaxSize(),
-                                isPip = isPip,
-                                isPipReturning = isPipReturning,
-                                enterPip = enterPip,
-                                configureAutoPip = configureAutoPip,
-                                onBack = {},
-                                onProgress = { position, duration ->
-                                    playing = current.copy(startPosition = position)
-                                    viewModel.recordPlayback(
-                                        current.line.id,
-                                        current.episode.name,
-                                        current.episode.url,
-                                        position,
-                                        duration,
-                                    )
-                                },
-                            )
-                        }
+                        Box(Modifier.weight(1.65f).aspectRatio(16f / 9f)) { movablePlayer() }
+                        DetailInfoList(
+                            detail = detail,
+                            posterVideo = posterVideo,
+                            activePlaying = activePlaying,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            posterModifier = posterModifier,
+                            titleModifier = titleModifier,
+                            onEpisode = ::selectEpisode,
+                        )
                     }
-                    LazyColumn(
-                        Modifier.fillMaxWidth().weight(1f),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        item {
-                        Row(
-                            Modifier.padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        ) {
-                            PosterImage(
-                                posterVideo.poster,
-                                null,
-                                Modifier
-                                    .width(116.dp)
-                                    .aspectRatio(0.71f)
-                                    .then(posterModifier(posterVideo))
-                                    .clip(RoundedCornerShape(8.dp)),
-                            )
-                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text(
-                                    detail.video.title,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = titleModifier(posterVideo),
-                                )
-                                detail.video.subtitle.takeIf(String::isNotBlank)?.let { Text(it) }
-                                Text(listOf(detail.video.year, detail.video.area).filter(String::isNotBlank).joinToString(" · "))
-                                detail.video.actors.takeIf(String::isNotBlank)?.let {
-                                    Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-                        }
-                    }
-                    item {
-                        Column(Modifier.padding(horizontal = 16.dp)) {
-                            Text("播放线路", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text("不同线路的清晰度和速度可能不同，播放不畅时可直接切换。", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                    if (detail.lines.isEmpty()) item { Text("暂无可用线路", Modifier.padding(horizontal = 16.dp)) }
-                    detail.lines.forEach { line ->
-                        item {
-                            Column(Modifier.padding(horizontal = 16.dp)) {
-                                Text(line.name, style = MaterialTheme.typography.labelLarge)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                line.episodes.forEach { episode ->
-                                    val selected = activePlaying?.line?.id == line.id &&
-                                        activePlaying.episode.url == episode.url
-                                    FilterChip(
-                                        selected = selected,
-                                        onClick = {
-                                            if (!selected) {
-                                                val current = activePlaying
-                                                val currentIndex = current?.line?.episodes?.indexOfFirst {
-                                                    it.url == current.episode.url
-                                                } ?: -1
-                                                val targetIndex = line.episodes.indexOfFirst { it.url == episode.url }
-                                                val sameEpisode = current != null && (
-                                                    current.episode.name == episode.name ||
-                                                        (currentIndex >= 0 && currentIndex == targetIndex &&
-                                                            current.line.episodes.size == line.episodes.size)
-                                                    )
-                                                val resumePosition = if (sameEpisode) {
-                                                    player.currentPosition.coerceAtLeast(0L)
-                                                } else {
-                                                    0L
-                                                }
-                                                playing = Playing(line, episode, resumePosition)
-                                            }
-                                        },
-                                        label = { Text(episode.name) },
-                                        leadingIcon = { Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)) },
-                                    )
-                                }
-                                }
-                            }
-                        }
+                } else {
+                    Column(Modifier.fillMaxSize().padding(padding)) {
+                        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) { movablePlayer() }
+                        DetailInfoList(
+                            detail = detail,
+                            posterVideo = posterVideo,
+                            activePlaying = activePlaying,
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            posterModifier = posterModifier,
+                            titleModifier = titleModifier,
+                            onEpisode = ::selectEpisode,
+                        )
                     }
                 }
+            }
+        }
+    }
+    }
+}
+
+@Composable
+private fun DetailInfoList(
+    detail: com.ikan.app.model.VideoDetail,
+    posterVideo: Video,
+    activePlaying: Playing?,
+    modifier: Modifier,
+    posterModifier: @Composable (Video) -> Modifier,
+    titleModifier: @Composable (Video) -> Modifier,
+    onEpisode: (PlayLine, PlayEpisode) -> Unit,
+) {
+    LazyColumn(
+        modifier,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            Row(
+                Modifier.padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                PosterImage(
+                    posterVideo.poster,
+                    null,
+                    Modifier
+                        .width(116.dp)
+                        .aspectRatio(0.71f)
+                        .then(posterModifier(posterVideo))
+                        .clip(RoundedCornerShape(8.dp)),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(
+                        detail.video.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = titleModifier(posterVideo),
+                    )
+                    detail.video.subtitle.takeIf(String::isNotBlank)?.let { Text(it) }
+                    Text(listOf(detail.video.year, detail.video.area).filter(String::isNotBlank).joinToString(" · "))
+                    detail.video.actors.takeIf(String::isNotBlank)?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+        item {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Text("播放线路", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("不同线路的清晰度和速度可能不同，播放不畅时可直接切换。", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (detail.lines.isEmpty()) item { Text("暂无可用线路", Modifier.padding(horizontal = 16.dp)) }
+        detail.lines.forEach { line ->
+            item {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    Text(line.name, style = MaterialTheme.typography.labelLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        line.episodes.forEach { episode ->
+                            val selected = activePlaying?.line?.id == line.id &&
+                                activePlaying.episode.url == episode.url
+                            FilterChip(
+                                selected = selected,
+                                onClick = { if (!selected) onEpisode(line, episode) },
+                                label = { Text(episode.name) },
+                                leadingIcon = { Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1042,7 +1330,7 @@ private fun DetailRoute(
 private fun NativePlayer(
     player: ExoPlayer,
     title: String,
-    playing: Playing,
+    playing: Playing?,
     fullscreen: Boolean,
     modifier: Modifier,
     isPip: Boolean,
@@ -1050,6 +1338,11 @@ private fun NativePlayer(
     enterPip: () -> Unit,
     configureAutoPip: (Boolean) -> Unit,
     onBack: () -> Unit,
+    onFullscreenToggle: () -> Unit,
+    cachedEpisode: CachedEpisode?,
+    onCacheEpisode: () -> Unit,
+    onCacheLine: () -> Unit,
+    onPlaybackEnded: () -> Unit,
     onProgress: (Long, Long) -> Unit,
 ) {
     val context = LocalContext.current
@@ -1061,14 +1354,36 @@ private fun NativePlayer(
     var discovering by remember { mutableStateOf(false) }
     var castError by remember { mutableStateOf<String?>(null) }
     var showPlaybackSettings by remember { mutableStateOf(false) }
+    var showCacheOptions by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
     var controlsVisible by remember(player) { mutableStateOf(true) }
     var buffering by remember(player) { mutableStateOf(player.playbackState == Player.STATE_BUFFERING) }
     var playbackError by remember(player) { mutableStateOf<PlaybackException?>(player.playerError) }
+    var playerView by remember(player) { mutableStateOf<GesturePlayerView?>(null) }
     val currentOnProgress by rememberUpdatedState(onProgress)
+    val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
     fun saveProgress() {
         val duration = player.duration.takeUnless { it == C.TIME_UNSET } ?: 0
         currentOnProgress(player.currentPosition, duration)
+    }
+    fun openCastPicker() {
+        if (playing == null) return
+        showCast = true
+        discovering = true
+        castError = null
+        scope.launch {
+            runCatching { dlna.discover() }.onSuccess { devices = it }
+                .onFailure { castError = it.message ?: "搜索设备失败" }
+            discovering = false
+        }
+    }
+    fun requestCache() {
+        if (playing == null || cachedEpisode != null) return
+        if ((playing.line.episodes.size) > 1) {
+            showCacheOptions = true
+        } else {
+            onCacheEpisode()
+        }
     }
 
     DisposableEffect(player) {
@@ -1076,6 +1391,7 @@ private fun NativePlayer(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_READY) playbackError = null
+                if (playbackState == Player.STATE_ENDED) currentOnPlaybackEnded()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -1094,17 +1410,24 @@ private fun NativePlayer(
             saveProgress()
         }
     }
-    DisposableEffect(player, fullscreen) {
+    DisposableEffect(player) {
+        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        onDispose {
+            saveProgress()
+            configureAutoPip(false)
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    LaunchedEffect(fullscreen) {
         val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
         if (fullscreen) {
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
-        onDispose {
-            saveProgress()
-            configureAutoPip(false)
-            if (fullscreen) controller.show(WindowInsetsCompat.Type.systemBars())
-        }
+        controlsVisible = true
+        playerView?.showController()
     }
 
     Surface(modifier, color = androidx.compose.ui.graphics.Color.Black) {
@@ -1112,6 +1435,7 @@ private fun NativePlayer(
             AndroidView(
                 factory = { ctx ->
                     (LayoutInflater.from(ctx).inflate(R.layout.player_view, null, false) as GesturePlayerView).apply {
+                        playerView = this
                         this.player = player
                         onGestureFeedback = { gestureFeedback = it }
                         setControllerVisibilityListener(
@@ -1122,7 +1446,7 @@ private fun NativePlayer(
                         useController = !isPip && !isPipReturning
                         setShowPreviousButton(false)
                         setShowNextButton(false)
-                        setControllerShowTimeoutMs(if (fullscreen) 4_000 else 2_500)
+                        setControllerShowTimeoutMs(if (fullscreen) 6_000 else 5_000)
                         findViewById<View>(androidx.media3.ui.R.id.exo_center_controls)?.apply {
                             val controlsScale = if (fullscreen) 1f else 0.72f
                             scaleX = controlsScale
@@ -1135,6 +1459,16 @@ private fun NativePlayer(
                         setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                         keepScreenOn = true
                         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        configureActionHitTargets(
+                            visible = controlsVisible && !isPip && !isPipReturning,
+                            fullscreen = fullscreen,
+                            onBack = onBack,
+                            onCast = ::openCastPicker,
+                            onSettings = { showPlaybackSettings = true },
+                            onCache = ::requestCache,
+                            onPip = enterPip,
+                            onFullscreen = onFullscreenToggle,
+                        )
                         post { activity.updatePipSourceRect(this) }
                     }
                 },
@@ -1143,7 +1477,7 @@ private fun NativePlayer(
                     it.useController = !isPip && !isPipReturning
                     it.setShowPreviousButton(false)
                     it.setShowNextButton(false)
-                    it.setControllerShowTimeoutMs(if (fullscreen) 4_000 else 2_500)
+                    it.setControllerShowTimeoutMs(if (fullscreen) 6_000 else 5_000)
                     it.findViewById<View>(androidx.media3.ui.R.id.exo_center_controls)?.apply {
                         val controlsScale = if (fullscreen) 1f else 0.72f
                         scaleX = controlsScale
@@ -1153,12 +1487,23 @@ private fun NativePlayer(
                         visibility = View.GONE
                     }
                     it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    it.configureActionHitTargets(
+                        visible = controlsVisible && !isPip && !isPipReturning,
+                        fullscreen = fullscreen,
+                        onBack = onBack,
+                        onCast = ::openCastPicker,
+                        onSettings = { showPlaybackSettings = true },
+                        onCache = ::requestCache,
+                        onPip = enterPip,
+                        onFullscreen = onFullscreenToggle,
+                    )
                     if (!isPip && !isPipReturning) {
                         it.post { activity.updatePipSourceRect(it) }
                     }
                 },
                 onRelease = {
                     (it as? GesturePlayerView)?.onGestureFeedback = null
+                    if (playerView === it) playerView = null
                     it.player = null
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -1171,6 +1516,7 @@ private fun NativePlayer(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier
                         .align(Alignment.Center)
+                        .zIndex(3f)
                         .background(
                             androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f),
                             RoundedCornerShape(12.dp),
@@ -1180,13 +1526,13 @@ private fun NativePlayer(
             }
             if (buffering && playbackError == null) {
                 CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier.align(Alignment.Center).zIndex(2f),
                     color = androidx.compose.ui.graphics.Color.White,
                 )
             }
             playbackError?.let {
                 Column(
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier.align(Alignment.Center).zIndex(3f),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -1202,6 +1548,7 @@ private fun NativePlayer(
                 Row(
                     Modifier
                         .align(if (fullscreen) Alignment.TopCenter else Alignment.TopEnd)
+                        .zIndex(4f)
                         .then(if (fullscreen) Modifier.fillMaxWidth() else Modifier)
                         .background(
                             androidx.compose.ui.graphics.Color.Black.copy(alpha = if (fullscreen) 0.55f else 0.4f),
@@ -1210,27 +1557,15 @@ private fun NativePlayer(
                         .height(if (fullscreen) 56.dp else 48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (fullscreen) IconButton(onClick = { saveProgress(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = androidx.compose.ui.graphics.Color.White)
-                    }
+                    if (fullscreen) PlayerActionIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     if (fullscreen) Text(title, color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.weight(1f), maxLines = 1)
-                    IconButton(onClick = {
-                        showCast = true
-                        discovering = true
-                        castError = null
-                        scope.launch {
-                            runCatching { dlna.discover() }.onSuccess { devices = it }
-                                .onFailure { castError = it.message ?: "搜索设备失败" }
-                            discovering = false
-                        }
-                    }) { Icon(Icons.Default.Cast, "DLNA 投屏", tint = androidx.compose.ui.graphics.Color.White) }
-                    IconButton(onClick = { showPlaybackSettings = true }) {
-                        Icon(Icons.Default.Settings, "速度与音轨", tint = androidx.compose.ui.graphics.Color.White)
-                    }
+                    PlayerActionIcon(Icons.Default.Cast, "DLNA 投屏", enabled = playing != null)
+                    PlayerActionIcon(Icons.Default.Settings, "速度与音轨")
                 }
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
+                        .zIndex(4f)
                         .background(
                             androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f),
                             RoundedCornerShape(topStart = 12.dp),
@@ -1238,23 +1573,40 @@ private fun NativePlayer(
                         .height(48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = enterPip) {
-                        Icon(Icons.Default.PictureInPicture, "画中画", tint = androidx.compose.ui.graphics.Color.White)
-                    }
-                    IconButton(onClick = {
-                        saveProgress()
-                        activity.requestedOrientation =
-                            if (activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                            } else {
-                                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                            }
-                    }) {
-                        Icon(Icons.Default.Fullscreen, "横竖屏切换", tint = androidx.compose.ui.graphics.Color.White)
-                    }
+                    PlayerActionIcon(
+                        if (cachedEpisode?.completed == true) Icons.Default.DownloadDone else Icons.Default.Download,
+                        when {
+                            cachedEpisode?.completed == true -> "已缓存"
+                            cachedEpisode != null -> "缓存中"
+                            else -> "缓存"
+                        },
+                        enabled = playing != null && cachedEpisode == null,
+                    )
+                    PlayerActionIcon(Icons.Default.PictureInPicture, "画中画")
+                    PlayerActionIcon(Icons.Default.Fullscreen, "横竖屏切换")
                 }
             }
         }
+    }
+
+    if (showCacheOptions) {
+        AlertDialog(
+            onDismissRequest = { showCacheOptions = false },
+            title = { Text("缓存视频") },
+            text = { Text("选择缓存当前一集，或缓存当前线路的全部剧集。") },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCacheOptions = false
+                    onCacheEpisode()
+                }) { Text("缓存本集") }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCacheOptions = false
+                    onCacheLine()
+                }) { Text("缓存全集") }
+            },
+        )
     }
 
     if (showPlaybackSettings) {
@@ -1340,7 +1692,8 @@ private fun NativePlayer(
                         leadingContent = { Icon(Icons.Default.Cast, null) },
                         modifier = Modifier.clickable {
                             scope.launch {
-                                runCatching { dlna.play(device, playing.episode.url, "$title - ${playing.episode.name}") }
+                                val current = playing ?: return@launch
+                                runCatching { dlna.play(device, current.episode.url, "$title - ${current.episode.name}") }
                                     .onSuccess { player.pause(); showCast = false }
                                     .onFailure { castError = it.message ?: "投屏失败" }
                             }
@@ -1351,6 +1704,21 @@ private fun NativePlayer(
         },
         confirmButton = { TextButton(onClick = { showCast = false }) { Text("关闭") } },
     )
+}
+
+@Composable
+private fun PlayerActionIcon(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean = true,
+) {
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        Icon(
+            icon,
+            description,
+            tint = androidx.compose.ui.graphics.Color.White.copy(alpha = if (enabled) 1f else 0.45f),
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1366,6 +1734,7 @@ private fun LibraryScreen(
     titleModifier: @Composable (Video) -> Modifier,
     gridState: LazyGridState,
     onClear: (() -> Unit)? = null,
+    cachedVideoIds: Set<String> = emptySet(),
 ) {
     Scaffold(
         modifier = modifier,
@@ -1391,35 +1760,274 @@ private fun LibraryScreen(
                 contentAlignment = Alignment.Center,
             ) { Text(emptyText) }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(112.dp),
-                state = gridState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 16.dp,
-                    top = padding.calculateTopPadding() + 16.dp,
-                    end = 16.dp,
-                    bottom = navigationPadding.calculateBottomPadding() + 16.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                items(entries, key = { it.videoId }) { entry ->
-                    Column(Modifier.animateItem()) {
-                        VideoCard(
-                            Video(entry.videoId, entry.title, entry.poster),
-                            onVideo,
-                            posterModifier = posterModifier,
-                            titleModifier = titleModifier,
-                        )
-                        if (entry.playedAt != null && entry.durationMs > 0) {
-                            val percent = (entry.positionMs * 100 / entry.durationMs).coerceIn(0, 100)
-                            Text("${entry.episodeName.orEmpty()} · $percent%", style = MaterialTheme.typography.labelSmall)
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val medium = maxWidth >= 600.dp
+                val expanded = maxWidth >= 840.dp
+                val gridMinWidth = when {
+                    expanded -> 168.dp
+                    medium -> 152.dp
+                    else -> 112.dp
+                }
+                val horizontalPadding = when {
+                    expanded -> 32.dp
+                    medium -> 24.dp
+                    else -> 16.dp
+                }
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(gridMinWidth),
+                    state = gridState,
+                    modifier = Modifier
+                        .widthIn(max = 1400.dp)
+                        .fillMaxSize()
+                        .align(Alignment.TopCenter),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = horizontalPadding,
+                        top = padding.calculateTopPadding() + 16.dp,
+                        end = horizontalPadding,
+                        bottom = navigationPadding.calculateBottomPadding() + 16.dp,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    items(entries, key = { it.videoId }) { entry ->
+                        Column(Modifier.animateItem()) {
+                            VideoCard(
+                                Video(entry.videoId, entry.title, entry.poster),
+                                onVideo,
+                                posterModifier = posterModifier,
+                                titleModifier = titleModifier,
+                            )
+                            if (entry.playedAt != null && entry.durationMs > 0) {
+                                val percent = (entry.positionMs * 100 / entry.durationMs).coerceIn(0, 100)
+                                Text("${entry.episodeName.orEmpty()} · $percent%", style = MaterialTheme.typography.labelSmall)
+                            }
+                            if (entry.videoId in cachedVideoIds) {
+                                Text(
+                                    "已缓存",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun CacheScreen(
+    downloads: List<CachedEpisode>,
+    modifier: Modifier,
+    navigationPadding: androidx.compose.foundation.layout.PaddingValues,
+    onPlay: (CachedEpisode) -> Unit,
+    onDelete: (String) -> Unit,
+    onSetPaused: (String, Boolean) -> Unit,
+    onClear: () -> Unit,
+) {
+    var confirmClear by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<CachedEpisode?>(null) }
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            TopAppBar(
+                title = { Text("缓存") },
+                actions = {
+                    if (downloads.isNotEmpty()) {
+                        IconButton(onClick = { confirmClear = true }) {
+                            Icon(Icons.Default.ClearAll, "清空全部缓存")
+                        }
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (downloads.isEmpty()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(
+                        top = padding.calculateTopPadding(),
+                        bottom = navigationPadding.calculateBottomPadding(),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("还没有缓存节目")
+            }
+        } else {
+            Box(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+                LazyColumn(
+                    Modifier
+                        .widthIn(max = 960.dp)
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                        .align(Alignment.TopCenter),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        bottom = navigationPadding.calculateBottomPadding() + 16.dp,
+                    ),
+                ) {
+                    items(downloads, key = { it.id }) { item ->
+                        val dismissState = rememberSwipeToDismissBoxState()
+                        LaunchedEffect(dismissState.settledValue) {
+                            if (dismissState.settledValue == SwipeToDismissBoxValue.EndToStart) {
+                                pendingDelete = item
+                                dismissState.reset()
+                            }
+                        }
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            enableDismissFromStartToEnd = false,
+                            backgroundContent = {
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .background(MaterialTheme.colorScheme.errorContainer)
+                                        .padding(end = 24.dp),
+                                    contentAlignment = Alignment.CenterEnd,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        "删除缓存",
+                                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            },
+                        ) {
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        item.title,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                supportingContent = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Text("${item.lineName} · ${item.episodeName}")
+                                        Text(
+                                            cacheStatus(item),
+                                            style = MaterialTheme.typography.labelMedium,
+                                        )
+                                        if (!item.completed && item.percent >= 0f) {
+                                            LinearProgressIndicator(
+                                                progress = {
+                                                    (item.percent / 100f).coerceIn(0f, 1f)
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                drawStopIndicator = {},
+                                            )
+                                        }
+                                    }
+                                },
+                                leadingContent = {
+                                    PosterImage(
+                                        item.poster,
+                                        item.title,
+                                        Modifier
+                                            .width(64.dp)
+                                            .aspectRatio(0.71f)
+                                            .clip(RoundedCornerShape(6.dp)),
+                                    )
+                                },
+                                trailingContent = {
+                                    val canChangeState =
+                                        !item.completed && item.state != Download.STATE_REMOVING
+                                    val resume =
+                                        item.paused || item.state == Download.STATE_FAILED
+                                    IconButton(
+                                        onClick = { onSetPaused(item.id, !resume) },
+                                        enabled = canChangeState,
+                                    ) {
+                                        Icon(
+                                            when {
+                                                item.completed -> Icons.Default.DownloadDone
+                                                resume -> Icons.Default.PlayArrow
+                                                else -> Icons.Default.Pause
+                                            },
+                                            when {
+                                                item.completed -> "已缓存"
+                                                resume -> "继续缓存"
+                                                else -> "暂停缓存"
+                                            },
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.combinedClickable(
+                                    onClick = { onPlay(item) },
+                                    onLongClick = { pendingDelete = item },
+                                ),
+                            )
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空全部缓存？") },
+            text = { Text("已缓存和正在缓存的节目都会被删除。") },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    onClear()
+                }) { Text("清空") }
+            },
+        )
+    }
+    pendingDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除缓存？") },
+            text = { Text("将删除“${item.title} · ${item.episodeName}”及已缓存的部分。") },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDelete = null
+                    onDelete(item.id)
+                }) { Text("删除") }
+            },
+        )
+    }
+}
+
+private fun cacheStatus(item: CachedEpisode): String {
+    val size = when {
+        item.bytesDownloaded >= 1024L * 1024 * 1024 ->
+            "%.1f GB".format(item.bytesDownloaded / (1024f * 1024 * 1024))
+        item.bytesDownloaded >= 1024L * 1024 ->
+            "%.1f MB".format(item.bytesDownloaded / (1024f * 1024))
+        else -> "${item.bytesDownloaded / 1024} KB"
+    }
+    return when (item.state) {
+        Download.STATE_COMPLETED -> "已缓存 · $size"
+        Download.STATE_DOWNLOADING -> {
+            val progress = item.percent.takeIf { it >= 0f }?.let { " · ${it.toInt()}%" }.orEmpty()
+            val speed = when {
+                item.speedBytesPerSecond >= 1024L * 1024 ->
+                    " · %.1f MB/s".format(item.speedBytesPerSecond / (1024f * 1024))
+                item.speedBytesPerSecond >= 1024L ->
+                    " · ${item.speedBytesPerSecond / 1024} KB/s"
+                else -> ""
+            }
+            val threads = item.connections.takeIf { it > 0 }?.let { " · ${it}线程" }.orEmpty()
+            "缓存中$progress · $size$threads$speed"
+        }
+        Download.STATE_QUEUED -> "等待缓存 · $size"
+        Download.STATE_STOPPED -> "已暂停 · $size"
+        Download.STATE_FAILED -> "缓存失败 · 已保留 $size"
+        Download.STATE_REMOVING -> "正在删除"
+        Download.STATE_RESTARTING -> "正在重新开始"
+        else -> size
     }
 }
 
@@ -1444,7 +2052,13 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = { TopAppBar(title = { Text("设置") }) },
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding)) {
+        LazyColumn(
+            Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxSize()
+                .align(Alignment.TopCenter),
+        ) {
             item { SettingsHeader("外观") }
             item {
                 SettingsRow(
@@ -1498,6 +2112,7 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
             item {
                 SettingsRow(Icons.Default.Info, "关于爱看", "版本 ${BuildConfig.VERSION_NAME} · 原生高性能播放器", clickable = false) { }
             }
+        }
         }
     }
 
@@ -1612,10 +2227,24 @@ private fun ErrorState(error: String, retry: () -> Unit, modifier: Modifier = Mo
 @Composable
 private fun IKanTheme(mode: ThemeMode, content: @Composable () -> Unit) {
     val context = LocalContext.current
+    val view = LocalView.current
     val systemDark = (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     val dark = mode == ThemeMode.DARK || (mode == ThemeMode.SYSTEM && systemDark)
     val colors: ColorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     } else if (dark) darkColorScheme() else lightColorScheme()
-    MaterialTheme(colorScheme = colors, content = content)
+    SideEffect {
+        val activity = context as? ComponentActivity ?: return@SideEffect
+        WindowCompat.getInsetsController(activity.window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
+    MaterialTheme(colorScheme = colors) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = colors.background,
+            content = content,
+        )
+    }
 }

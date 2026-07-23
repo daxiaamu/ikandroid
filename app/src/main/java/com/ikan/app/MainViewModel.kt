@@ -7,6 +7,8 @@ import com.ikan.app.data.IKanRepository
 import com.ikan.app.data.LibraryEntity
 import com.ikan.app.model.CatalogPage
 import com.ikan.app.model.HomeCategory
+import com.ikan.app.model.PlayEpisode
+import com.ikan.app.model.PlayLine
 import com.ikan.app.model.ThemeMode
 import com.ikan.app.model.VideoDetail
 import kotlinx.coroutines.Job
@@ -60,6 +62,7 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
     val searchHistory = app.preferences.searchHistory.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList(),
     )
+    val downloads get() = app.playbackEngine.downloads
 
     init { loadCategory(HomeCategory.RECOMMEND, useStartupPrefetch = true) }
 
@@ -140,6 +143,21 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
             repository.recordPlayback(video, lineId, episodeName, url, position, duration)
         }
     }
+
+    fun cacheEpisode(line: PlayLine, episode: PlayEpisode) {
+        val video = _detail.value.detail?.video ?: return
+        app.playbackEngine.enqueue(video, line, episode)
+    }
+
+    fun cacheLine(line: PlayLine) {
+        val video = _detail.value.detail?.video ?: return
+        app.playbackEngine.enqueueLine(video, line)
+    }
+
+    fun removeDownload(id: String) = app.playbackEngine.removeDownload(id)
+    fun setDownloadPaused(id: String, paused: Boolean) =
+        app.playbackEngine.setDownloadPaused(id, paused)
+    fun clearDownloads() = app.playbackEngine.removeAllDownloads()
 
     fun clearHistory() = viewModelScope.launch { repository.clearHistory() }
     fun clearSearchHistory() = viewModelScope.launch { app.preferences.clearSearchHistory() }
