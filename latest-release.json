@@ -1,9 +1,9 @@
 {
-  "tag": "v1.0.3",
-  "versionName": "1.0.3",
-  "name": "ikandroid v1.0.3",
-  "notes": "## 更新内容\n\n- 修复部分网络环境下无法检查更新的问题。\n- 提升检查更新的连接稳定性，网络异常时自动尝试可用服务。\n- 完善更新弹窗中的版本说明展示。",
-  "publishedAt": "2026-07-23T02:02:47Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.3",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.3/app-debug.apk"
+  "tag": "v1.0.4",
+  "versionName": "1.0.4",
+  "name": "ikandroid v1.0.4",
+  "notes": "## 更新内容\n\n- 显著提升 APP 冷启动与首页内容显示速度。\n- 首页会优先展示上次成功加载的内容，并在后台自动更新。\n- 网络不佳或暂时离线时，仍可浏览已加载过的首页内容。\n- 缩小安装包体积，提升安装与更新体验。",
+  "publishedAt": "2026-07-23T02:19:58Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.4",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.4/app-release.apk"
 }
