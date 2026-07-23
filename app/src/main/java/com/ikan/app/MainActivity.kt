@@ -33,6 +33,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardActions
@@ -130,6 +132,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -142,6 +145,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -149,16 +153,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect as ComposeRect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -168,7 +175,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -316,25 +322,29 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     SETTINGS("设置", Icons.Default.Settings),
 }
 
-@Composable
-private fun Modifier.keepHorizontalScrollInChild(): Modifier {
-    val connection = remember {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset = if (source == NestedScrollSource.UserInput) {
-                Offset(available.x, 0f)
-            } else {
-                Offset.Zero
-            }
+private class TabSwipeState {
+    var pagerOriginInRoot = Offset.Zero
+    val exclusions = mutableMapOf<Any, ComposeRect>()
+    var animationJob: Job? = null
+}
 
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
-                Velocity(available.x, 0f)
+private val LocalTabSwipeState =
+    staticCompositionLocalOf<TabSwipeState?> { null }
+
+@Composable
+private fun Modifier.excludeFromTabSwipe(key: Any): Modifier {
+    val registry = LocalTabSwipeState.current
+    val registration = remember(key) { Any() }
+    DisposableEffect(registry, registration) {
+        onDispose { registry?.exclusions?.remove(registration) }
+    }
+    return if (registry == null) {
+        this
+    } else {
+        onGloballyPositioned { coordinates ->
+            registry.exclusions[registration] = coordinates.boundsInRoot()
         }
     }
-    return nestedScroll(connection)
 }
 
 private data class Playing(val line: PlayLine, val episode: PlayEpisode, val startPosition: Long = 0)
@@ -540,6 +550,7 @@ private fun MainTabs(
     )
     val scope = rememberCoroutineScope()
     val visibleTab = tabs[pagerState.currentPage]
+    val swipeState = remember { TabSwipeState() }
 
     LaunchedEffect(pagerState.settledPage) {
         val settledTab = tabs[pagerState.settledPage]
@@ -549,7 +560,9 @@ private fun MainTabs(
     fun selectTab(tab: MainTab) {
         onSelected(tab)
         if (pagerState.currentPage != tab.ordinal || pagerState.currentPageOffsetFraction != 0f) {
-            scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
+            swipeState.animationJob?.cancel()
+            swipeState.animationJob =
+                scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
         }
     }
 
@@ -560,10 +573,76 @@ private fun MainTabs(
     ) {
         HorizontalPager(
             state = pagerState,
-            modifier = modifier,
+            modifier = modifier
+                .onGloballyPositioned { coordinates ->
+                    swipeState.pagerOriginInRoot = coordinates.localToRoot(Offset.Zero)
+                }
+                .pointerInput(pagerState, tabs.size) {
+                    val flingThreshold = 400.dp.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val downInRoot = down.position + swipeState.pagerOriginInRoot
+                        if (swipeState.exclusions.values.any { it.contains(downInRoot) }) {
+                            return@awaitEachGesture
+                        }
+
+                        // A fresh drag must take ownership immediately; dispatchRawDelta does not
+                        // cancel an animateScrollToPage that is still settling from the last swipe.
+                        swipeState.animationJob?.cancel()
+                        swipeState.animationJob = null
+                        val startPage = pagerState.currentPage
+                        val velocityTracker = VelocityTracker()
+                        velocityTracker.addPosition(down.uptimeMillis, down.position)
+                        var totalX = 0f
+                        var totalY = 0f
+                        var horizontalDrag = false
+                        var verticalGesture = false
+                        var pressed: Boolean
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: break
+                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+                            val delta = change.positionChange()
+                            totalX += delta.x
+                            totalY += delta.y
+                            if (!horizontalDrag && !verticalGesture &&
+                                kotlin.math.max(kotlin.math.abs(totalX), kotlin.math.abs(totalY)) >
+                                viewConfiguration.touchSlop
+                            ) {
+                                horizontalDrag = kotlin.math.abs(totalX) > kotlin.math.abs(totalY)
+                                verticalGesture = !horizontalDrag
+                            }
+                            if (horizontalDrag && delta.x != 0f) {
+                                change.consume()
+                                pagerState.dispatchRawDelta(-delta.x)
+                            }
+                            pressed = change.pressed
+                        } while (pressed)
+
+                        if (horizontalDrag) {
+                            val velocityX = velocityTracker.calculateVelocity().x
+                            val pagePosition =
+                                pagerState.currentPage + pagerState.currentPageOffsetFraction
+                            val pageDelta = pagePosition - startPage
+                            val target = when {
+                                velocityX <= -flingThreshold -> startPage + 1
+                                velocityX >= flingThreshold -> startPage - 1
+                                pageDelta >= 0.5f -> startPage + 1
+                                pageDelta <= -0.5f -> startPage - 1
+                                else -> startPage
+                            }.coerceIn(tabs.indices)
+                            swipeState.animationJob =
+                                scope.launch { pagerState.animateScrollToPage(target) }
+                        }
+                    }
+                },
+            userScrollEnabled = false,
             key = { tabs[it] },
         ) { page ->
-            content(tabs[page], padding)
+            CompositionLocalProvider(LocalTabSwipeState provides swipeState) {
+                content(tabs[page], padding)
+            }
         }
     }
 
@@ -713,7 +792,7 @@ private fun HomeScreen(
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .keepHorizontalScrollInChild(),
+                .excludeFromTabSwipe("home-categories"),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -787,7 +866,7 @@ private fun CatalogContent(
                             LazyRow(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .keepHorizontalScrollInChild(),
+                                    .excludeFromTabSwipe("section:$sectionKey"),
                                 state = sectionState,
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -836,7 +915,7 @@ private fun CatalogGrid(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .keepHorizontalScrollInChild(),
+                    .excludeFromTabSwipe("filters:${page.title}"),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
