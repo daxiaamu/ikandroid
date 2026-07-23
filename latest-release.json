@@ -1,9 +1,9 @@
 {
-  "tag": "v1.0.8",
-  "versionName": "1.0.8",
-  "name": "ikandroid v1.0.8",
-  "notes": "## 更新内容\n\n- 提升拖动播放进度后的恢复速度。\n- 优化高版本 Android 设备的流媒体连接效率。\n- 改善短距离回看时的响应表现。",
-  "publishedAt": "2026-07-23T11:52:41Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.8",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.8/app-release.apk"
+  "tag": "v1.0.9",
+  "versionName": "1.0.9",
+  "name": "ikandroid v1.0.9",
+  "notes": "## 更新内容\n\n- 新增剧集自动连播。\n- 新增预下载与缓存管理，支持全集缓存、暂停或继续、后台缓存和已缓存内容离线观看。\n- 优化缓存调度与速度显示，提高拖动、切换线路和缓存过程的响应。\n- 优化详情页、全屏、小窗及平板布局之间的衔接体验。\n- 更新应用图标，并改进播放器控制与缓存管理操作。",
+  "publishedAt": "2026-07-23T16:35:34Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.9",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.9/app-release.apk"
 }
