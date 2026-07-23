@@ -16,8 +16,11 @@ android {
         versionName = "1.0.0"
         val githubUrl = providers.gradleProperty("IKAN_GITHUB_URL").orElse("").get()
         val authorUrl = providers.gradleProperty("IKAN_AUTHOR_URL").orElse("").get()
+        val updateJsonUrl = providers.gradleProperty("IKAN_UPDATE_JSON_URL")
+            .orElse("https://raw.githubusercontent.com/daxiaamu/ikandroid/main/latest-release.json").get()
         buildConfigField("String", "GITHUB_URL", "\"$githubUrl\"")
         buildConfigField("String", "AUTHOR_URL", "\"$authorUrl\"")
+        buildConfigField("String", "UPDATE_JSON_URL", "\"$updateJsonUrl\"")
         vectorDrawables.useSupportLibrary = true
     }
 

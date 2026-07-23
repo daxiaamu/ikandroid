@@ -1369,7 +1369,10 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val updater = remember { AppUpdater(context.applicationContext) }
     var themeDialog by remember { mutableStateOf(false) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
 
     fun open(url: String, missing: String) {
         if (url.isBlank()) scope.launch { snackbar.showSnackbar(missing) }
@@ -1404,8 +1407,22 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
                 }
             }
             item {
-                SettingsRow(Icons.Default.SystemUpdate, "检查更新", "前往 GitHub Releases 获取最新版", external = true) {
-                    open(BuildConfig.GITHUB_URL.takeIf(String::isNotBlank)?.trimEnd('/')?.plus("/releases") ?: "", "请先在 gradle.properties 配置 IKAN_GITHUB_URL")
+                SettingsRow(
+                    Icons.Default.SystemUpdate,
+                    "检查更新",
+                    if (checkingUpdate) "正在从 GitHub 检查…" else "当前版本 ${BuildConfig.VERSION_NAME}",
+                    clickable = !checkingUpdate,
+                ) {
+                    checkingUpdate = true
+                    scope.launch {
+                        runCatching { updater.check() }
+                            .onSuccess { info ->
+                                if (updater.isNewer(info.version)) availableUpdate = info
+                                else snackbar.showSnackbar("已是最新版本 ${BuildConfig.VERSION_NAME}")
+                            }
+                            .onFailure { snackbar.showSnackbar(it.message ?: "检查更新失败") }
+                        checkingUpdate = false
+                    }
                 }
             }
             item {
@@ -1441,6 +1458,41 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
         },
         confirmButton = {},
     )
+
+    availableUpdate?.let { info ->
+        AlertDialog(
+            onDismissRequest = { availableUpdate = null },
+            title = { Text("发现新版本 ${info.version}") },
+            text = { Text(info.name.ifBlank { "GitHub Release ${info.version}" }) },
+            dismissButton = {
+                TextButton(onClick = { availableUpdate = null }) { Text("稍后") }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                        !context.packageManager.canRequestPackageInstalls()
+                    ) {
+                        context.startActivity(
+                            Intent(
+                                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:${context.packageName}"),
+                            ),
+                        )
+                        scope.launch { snackbar.showSnackbar("授权后请再次点击下载并安装") }
+                    } else {
+                        runCatching { updater.download(info) }
+                            .onSuccess {
+                                availableUpdate = null
+                                scope.launch { snackbar.showSnackbar("已开始下载，完成后将打开安装界面") }
+                            }
+                            .onFailure { error ->
+                                scope.launch { snackbar.showSnackbar(error.message ?: "下载失败") }
+                            }
+                    }
+                }) { Text("下载并安装") }
+            },
+        )
+    }
 }
 
 @Composable
