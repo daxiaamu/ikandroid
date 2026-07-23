@@ -69,11 +69,17 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
         catalogJob?.cancel()
         catalogJob = viewModelScope.launch {
             _catalog.value = CatalogUiState(loading = true)
-            _catalog.value = runCatching {
+            val cached = if (useStartupPrefetch && value == HomeCategory.RECOMMEND) app.cachedHome.await() else null
+            if (cached != null) _catalog.value = CatalogUiState(page = cached, loading = true)
+            runCatching {
                 if (useStartupPrefetch && value == HomeCategory.RECOMMEND) app.initialHome.await()
                 else repository.catalog(value)
+            }.onSuccess {
+                _catalog.value = CatalogUiState(page = it, loading = false)
+            }.onFailure {
+                _catalog.value = cached?.let { page -> CatalogUiState(page = page, loading = false) }
+                    ?: CatalogUiState(false, error = readable(it))
             }
-                .fold({ CatalogUiState(page = it, loading = false) }, { CatalogUiState(false, error = readable(it)) })
         }
     }
 

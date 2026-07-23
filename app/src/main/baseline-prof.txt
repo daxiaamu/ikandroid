@@ -1,0 +1,2 @@
+HSPLcom/ikan/app/**->**(**)**
+Lcom/ikan/app/**
