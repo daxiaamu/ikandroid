@@ -1,9 +1,9 @@
 {
-  "tag": "v1.0.5",
-  "versionName": "1.0.5",
-  "name": "ikandroid v1.0.5",
-  "notes": "## 更新内容\n\n- 优化应用更新下载通知的显示效果。\n- 简化下载状态文案，让通知更加清晰自然。",
-  "publishedAt": "2026-07-23T02:26:56Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.5",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.5/app-release.apk"
+  "tag": "v1.0.6",
+  "versionName": "1.0.6",
+  "name": "ikandroid v1.0.6",
+  "notes": "## 更新内容\n\n- 修复播放历史页底部内容可能被导航栏遮挡的问题。\n- 同步优化收藏页的底部滚动与内容显示。",
+  "publishedAt": "2026-07-23T02:38:57Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.6",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.6/app-release.apk"
 }
