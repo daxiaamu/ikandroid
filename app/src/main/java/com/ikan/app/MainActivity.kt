@@ -50,8 +50,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -256,7 +260,9 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder
                 .setAutoEnterEnabled(autoPipEnabled)
-                .setSeamlessResizeEnabled(true)
+                // Some vendor compositors briefly expose the Activity background while resizing
+                // the video surface. A snapshot cross-fade keeps the last frame visible instead.
+                .setSeamlessResizeEnabled(false)
         }
         return builder.build()
     }
@@ -285,6 +291,10 @@ private fun IKanApp(
     var detailVideo by remember { mutableStateOf<Video?>(null) }
     var frozenHistory by remember { mutableStateOf<List<LibraryEntity>?>(null) }
     val appScope = rememberCoroutineScope()
+    val homeListState = rememberLazyListState()
+    val homeGridState = rememberLazyGridState()
+    val favoritesGridState = rememberLazyGridState()
+    val historyGridState = rememberLazyGridState()
 
     fun openVideo(video: Video) {
         detailVideo = video
@@ -355,7 +365,15 @@ private fun IKanApp(
                     navigationModifier = navigationOverlayModifier,
                 ) { padding ->
                     when (tab) {
-                        MainTab.HOME -> HomeScreen(viewModel, padding, ::openVideo, sharedPosterModifier, sharedTitleModifier)
+                        MainTab.HOME -> HomeScreen(
+                            viewModel,
+                            padding,
+                            ::openVideo,
+                            sharedPosterModifier,
+                            sharedTitleModifier,
+                            homeListState,
+                            homeGridState,
+                        )
                         MainTab.FAVORITES -> {
                             val favorites by viewModel.favorites.collectAsStateWithLifecycle()
                             LibraryScreen(
@@ -366,6 +384,7 @@ private fun IKanApp(
                                 onVideo = ::openVideo,
                                 posterModifier = sharedPosterModifier,
                                 titleModifier = sharedTitleModifier,
+                                gridState = favoritesGridState,
                             )
                         }
                         MainTab.HISTORY -> {
@@ -381,6 +400,7 @@ private fun IKanApp(
                                 },
                                 posterModifier = sharedPosterModifier,
                                 titleModifier = sharedTitleModifier,
+                                gridState = historyGridState,
                                 onClear = viewModel::clearHistory,
                             )
                         }
@@ -449,6 +469,8 @@ private fun HomeScreen(
     onVideo: (Video) -> Unit,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
+    listState: LazyListState,
+    gridState: LazyGridState,
 ) {
     val catalog by viewModel.catalog.collectAsStateWithLifecycle()
     val category by viewModel.category.collectAsStateWithLifecycle()
@@ -526,6 +548,8 @@ private fun HomeScreen(
             onVideo = onVideo,
             posterModifier = posterModifier,
             titleModifier = titleModifier,
+            listState = listState,
+            gridState = gridState,
             onFilter = viewModel::loadPath,
             onNext = { path -> viewModel.loadPath(path, catalog.page?.title ?: category.label) },
             onRetry = { viewModel.loadCategory(category) },
@@ -539,6 +563,8 @@ private fun CatalogContent(
     onVideo: (Video) -> Unit,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
+    listState: LazyListState,
+    gridState: LazyGridState,
     onFilter: (String, String) -> Unit,
     onNext: (String) -> Unit,
     onRetry: () -> Unit,
@@ -549,7 +575,7 @@ private fun CatalogContent(
         state.page != null -> {
             val page = state.page
             if (page.sections.isNotEmpty()) {
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     page.sections.forEach { section ->
                         item { SectionTitle(section.title) }
                         item {
@@ -566,7 +592,7 @@ private fun CatalogContent(
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             } else {
-                CatalogGrid(page, state.loading, onVideo, posterModifier, titleModifier, onFilter, onNext)
+                CatalogGrid(page, state.loading, onVideo, posterModifier, titleModifier, gridState, onFilter, onNext)
             }
         }
     }
@@ -579,6 +605,7 @@ private fun CatalogGrid(
     onVideo: (Video) -> Unit,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
+    gridState: LazyGridState,
     onFilter: (String, String) -> Unit,
     onNext: (String) -> Unit,
 ) {
@@ -599,6 +626,7 @@ private fun CatalogGrid(
         }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(112.dp),
+            state = gridState,
             modifier = Modifier.weight(1f),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1327,6 +1355,7 @@ private fun LibraryScreen(
     onVideo: (Video) -> Unit,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
+    gridState: LazyGridState,
     onClear: (() -> Unit)? = null,
 ) {
     Scaffold(
@@ -1347,6 +1376,7 @@ private fun LibraryScreen(
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(112.dp),
+                state = gridState,
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
