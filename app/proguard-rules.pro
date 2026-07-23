@@ -1,0 +1,3 @@
+-keepattributes *Annotation*
+-dontwarn org.jsoup.**
+-keep class androidx.room.RoomDatabase { *; }

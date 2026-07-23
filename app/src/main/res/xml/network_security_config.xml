@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 部分历史片源和局域网投屏设备仍只提供 HTTP。 -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
