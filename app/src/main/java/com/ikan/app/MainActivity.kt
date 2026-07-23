@@ -187,6 +187,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setBackgroundDrawableResource(android.R.color.black)
         enableEdgeToEdge()
         setContent {
             val app = application as IKanApplication
@@ -260,9 +261,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder
                 .setAutoEnterEnabled(autoPipEnabled)
-                // Some vendor compositors briefly expose the Activity background while resizing
-                // the video surface. A snapshot cross-fade keeps the last frame visible instead.
-                .setSeamlessResizeEnabled(false)
+                .setSeamlessResizeEnabled(true)
         }
         return builder.build()
     }
