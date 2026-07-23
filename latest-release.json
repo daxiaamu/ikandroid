@@ -2,6 +2,7 @@
   "tag": "v1.0.2",
   "versionName": "1.0.2",
   "name": "ikandroid v1.0.2",
+  "notes": "## 更新内容\n\n- 优化首页、收藏和播放历史的浏览体验，进入详情后返回可继续停留在原来的位置。\n- 优化首页横向内容浏览，返回时保留各栏目的浏览进度。\n- 改进详情页进出动画与播放页面衔接，浏览和观看过程更加连贯。\n- 优化全屏与小窗切换体验，提升播放稳定性。",
   "publishedAt": "2026-07-23T01:46:57Z",
   "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.2",
   "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.2/app-debug.apk"
