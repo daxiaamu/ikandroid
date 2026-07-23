@@ -2,7 +2,11 @@ name: Update latest release JSON
 
 on:
   release:
-    types: [published, released, edited]
+    types: [published, edited]
+
+concurrency:
+  group: latest-release-json
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -12,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Write latest-release.json
         env:
@@ -38,4 +44,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add latest-release.json
           git diff --cached --quiet || git commit -m "Update latest release metadata"
-          git push
+          git push origin HEAD:main
