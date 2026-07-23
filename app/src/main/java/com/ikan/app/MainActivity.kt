@@ -33,6 +33,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -425,8 +427,8 @@ private fun IKanApp(
                     selected = tab,
                     onSelected = { tab = it },
                     navigationModifier = navigationOverlayModifier,
-                ) { padding ->
-                    when (tab) {
+                ) { visibleTab, padding ->
+                    when (visibleTab) {
                         MainTab.HOME -> HomeScreen(
                             viewModel,
                             padding,
@@ -500,8 +502,42 @@ private fun MainTabs(
     selected: MainTab,
     onSelected: (MainTab) -> Unit,
     navigationModifier: Modifier = Modifier,
-    content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
+    content: @Composable (MainTab, androidx.compose.foundation.layout.PaddingValues) -> Unit,
 ) {
+    val tabs = MainTab.entries
+    val pagerState = rememberPagerState(
+        initialPage = selected.ordinal,
+        pageCount = { tabs.size },
+    )
+    val scope = rememberCoroutineScope()
+    val visibleTab = tabs[pagerState.currentPage]
+
+    LaunchedEffect(pagerState.settledPage) {
+        val settledTab = tabs[pagerState.settledPage]
+        if (settledTab != selected) onSelected(settledTab)
+    }
+
+    fun selectTab(tab: MainTab) {
+        onSelected(tab)
+        if (pagerState.currentPage != tab.ordinal || pagerState.currentPageOffsetFraction != 0f) {
+            scope.launch { pagerState.animateScrollToPage(tab.ordinal) }
+        }
+    }
+
+    @Composable
+    fun PagerContent(
+        modifier: Modifier,
+        padding: androidx.compose.foundation.layout.PaddingValues,
+    ) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = modifier,
+            key = { tabs[it] },
+        ) { page ->
+            content(tabs[page], padding)
+        }
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         if (wide) {
@@ -509,16 +545,17 @@ private fun MainTabs(
                 NavigationRail(navigationModifier.fillMaxHeight().navigationBarsPadding().statusBarsPadding()) {
                     MainTab.entries.forEach { tab ->
                         NavigationRailItem(
-                            selected = selected == tab,
-                            onClick = { onSelected(tab) },
+                            selected = visibleTab == tab,
+                            onClick = { selectTab(tab) },
                             icon = { Icon(tab.icon, null) },
                             label = { Text(tab.label) },
                         )
                     }
                 }
-                Box(Modifier.weight(1f)) {
-                    content(androidx.compose.foundation.layout.PaddingValues())
-                }
+                PagerContent(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    padding = androidx.compose.foundation.layout.PaddingValues(),
+                )
             }
         } else {
             Scaffold(
@@ -526,15 +563,17 @@ private fun MainTabs(
                     NavigationBar(navigationModifier) {
                         MainTab.entries.forEach { tab ->
                             NavigationBarItem(
-                                selected = selected == tab,
-                                onClick = { onSelected(tab) },
+                                selected = visibleTab == tab,
+                                onClick = { selectTab(tab) },
                                 icon = { Icon(tab.icon, null) },
                                 label = { Text(tab.label) },
                             )
                         }
                     }
                 },
-                content = content,
+                content = { padding ->
+                    PagerContent(Modifier.fillMaxSize(), padding)
+                },
             )
         }
     }
@@ -1069,17 +1108,20 @@ private fun DetailRoute(
     val movablePlayer = remember(player) {
         movableContentWithReceiverOf<LookaheadScope> {
             val presentation = playerPresentation.value
+            val playerModifier = if (presentation.isPip) {
+                Modifier
+            } else {
+                Modifier.animateBounds(
+                    lookaheadScope = this@movableContentWithReceiverOf,
+                    boundsTransform = { _, _ -> tween(360) },
+                )
+            }
             NativePlayer(
                 player = player,
                 title = presentation.title,
                 playing = presentation.playing,
                 fullscreen = presentation.fullscreen,
-                modifier = Modifier
-                    .animateBounds(
-                        lookaheadScope = this@movableContentWithReceiverOf,
-                        boundsTransform = { _, _ -> tween(360) },
-                    )
-                    .fillMaxSize(),
+                modifier = playerModifier.fillMaxSize(),
                 isPip = presentation.isPip,
                 isPipReturning = presentation.isPipReturning,
                 enterPip = presentation.enterPip,
@@ -1096,6 +1138,13 @@ private fun DetailRoute(
     }
 
     LookaheadScope {
+        if (isPip) {
+            // Once Android hands the activity window to PiP, keep only the existing player
+            // surface in that window. Relaying out the detail scaffold inside the tiny PiP
+            // bounds makes the video jump after the system's source-rect animation.
+            Box(Modifier.fillMaxSize()) { movablePlayer() }
+            return@LookaheadScope
+        }
         if (fullscreen) {
             Box(Modifier.fillMaxSize()) { movablePlayer() }
             return@LookaheadScope
