@@ -1,9 +1,9 @@
 {
-  "tag": "v1.0.7",
-  "versionName": "1.0.7",
-  "name": "ikandroid v1.0.7",
-  "notes": "## 更新内容\n\n- 优化应用启动画面，移除多余的图标底板，让冷启动显示更加简洁自然。",
-  "publishedAt": "2026-07-23T11:16:00Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.7",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.7/app-release.apk"
+  "tag": "v1.0.8",
+  "versionName": "1.0.8",
+  "name": "ikandroid v1.0.8",
+  "notes": "## 更新内容\n\n- 提升拖动播放进度后的恢复速度。\n- 优化高版本 Android 设备的流媒体连接效率。\n- 改善短距离回看时的响应表现。",
+  "publishedAt": "2026-07-23T11:52:41Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.8",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.8/app-release.apk"
 }
