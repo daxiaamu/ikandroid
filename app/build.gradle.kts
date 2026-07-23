@@ -12,12 +12,12 @@ android {
         applicationId = "com.ikan.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
         val githubUrl = providers.gradleProperty("IKAN_GITHUB_URL").orElse("").get()
         val authorUrl = providers.gradleProperty("IKAN_AUTHOR_URL").orElse("").get()
         val updateJsonUrl = providers.gradleProperty("IKAN_UPDATE_JSON_URL")
-            .orElse("https://raw.githubusercontent.com/daxiaamu/ikandroid/main/latest-release.json").get()
+            .orElse("https://api.github.com/repos/daxiaamu/ikandroid/contents/latest-release.json?ref=main").get()
         buildConfigField("String", "GITHUB_URL", "\"$githubUrl\"")
         buildConfigField("String", "AUTHOR_URL", "\"$authorUrl\"")
         buildConfigField("String", "UPDATE_JSON_URL", "\"$updateJsonUrl\"")

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -23,24 +24,52 @@ data class UpdateInfo(
 
 class AppUpdater(private val context: Context) {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(8, TimeUnit.SECONDS)
         .build()
+    private val updateSources = listOf(
+        BuildConfig.UPDATE_JSON_URL,
+        "https://cdn.jsdelivr.net/gh/daxiaamu/ikandroid@main/latest-release.json",
+        "https://fastly.jsdelivr.net/gh/daxiaamu/ikandroid@main/latest-release.json",
+        "https://gcore.jsdelivr.net/gh/daxiaamu/ikandroid@main/latest-release.json",
+        "https://raw.githubusercontent.com/daxiaamu/ikandroid/main/latest-release.json",
+    ).distinct()
 
     suspend fun check(): UpdateInfo = withContext(Dispatchers.IO) {
+        var lastError: Throwable? = null
+        for (source in updateSources) {
+            try {
+                return@withContext fetch(source)
+            } catch (error: Throwable) {
+                lastError = error
+            }
+        }
+        throw IllegalStateException("暂时无法连接更新服务器，请稍后重试", lastError)
+    }
+
+    private fun fetch(source: String): UpdateInfo {
+        val separator = if ('?' in source) '&' else '?'
         val request = Request.Builder()
-            .url(BuildConfig.UPDATE_JSON_URL + "?t=" + System.currentTimeMillis())
+            .url(source + separator + "t=" + System.currentTimeMillis())
             .header("Cache-Control", "no-cache")
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "ikandroid/${BuildConfig.VERSION_NAME}")
             .build()
         val body = client.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "检查更新失败（HTTP ${response.code}）" }
             response.body.string()
         }
-        val json = JSONObject(body)
+        var json = JSONObject(body)
+        if (json.optString("encoding").equals("base64", ignoreCase = true)) {
+            val decoded = Base64.decode(json.getString("content"), Base64.DEFAULT)
+            json = JSONObject(decoded.toString(Charsets.UTF_8))
+        }
         val tag = json.optString("tag")
         val version = json.optString("versionName").ifBlank { tag.removePrefix("v") }
         check(version.isNotBlank()) { "仓库尚未发布版本" }
-        UpdateInfo(
+        return UpdateInfo(
             version = version,
             name = json.optString("name").ifBlank { tag },
             notes = json.optString("notes")

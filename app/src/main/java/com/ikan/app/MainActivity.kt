@@ -1454,7 +1454,7 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
                 SettingsRow(
                     Icons.Default.SystemUpdate,
                     "检查更新",
-                    if (checkingUpdate) "正在从 GitHub 检查…" else "当前版本 ${BuildConfig.VERSION_NAME}",
+                    if (checkingUpdate) "正在检查更新…" else "当前版本 ${BuildConfig.VERSION_NAME}",
                     clickable = !checkingUpdate,
                 ) {
                     checkingUpdate = true
