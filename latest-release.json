@@ -1,9 +1,9 @@
 {
-  "tag": "v1.0.9",
-  "versionName": "1.0.9",
-  "name": "ikandroid v1.0.9",
-  "notes": "## 更新内容\n\n- 新增剧集自动连播。\n- 新增预下载与缓存管理，支持全集缓存、暂停或继续、后台缓存和已缓存内容离线观看。\n- 优化缓存调度与速度显示，提高拖动、切换线路和缓存过程的响应。\n- 优化详情页、全屏、小窗及平板布局之间的衔接体验。\n- 更新应用图标，并改进播放器控制与缓存管理操作。",
-  "publishedAt": "2026-07-23T16:35:34Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.9",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.9/app-release.apk"
+  "tag": "v1.0.10",
+  "versionName": "1.0.10",
+  "name": "ikandroid v1.0.10",
+  "notes": "## 更新内容\n\n- 修复更新下载完成后未显示安装提示的问题。\n- 改进 Android 15 和 Android 16 上的更新包下载兼容性。\n- 下载在后台完成时提供明确的安装通知，返回 APP 后也会继续提示安装。\n- 修正发布签名，恢复与旧版本的覆盖升级兼容性。\n\n如果此前已下载 v1.0.9，请重新下载本版本。",
+  "publishedAt": "2026-07-23T17:00:02Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.10",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.10/app-release.apk"
 }
