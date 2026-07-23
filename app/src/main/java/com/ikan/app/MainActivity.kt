@@ -381,7 +381,8 @@ private fun IKanApp(
                                 title = "我的收藏",
                                 emptyText = "还没有收藏影片",
                                 entries = favorites,
-                                modifier = Modifier.padding(padding),
+                                modifier = Modifier.fillMaxSize(),
+                                navigationPadding = padding,
                                 onVideo = ::openVideo,
                                 posterModifier = sharedPosterModifier,
                                 titleModifier = sharedTitleModifier,
@@ -394,7 +395,8 @@ private fun IKanApp(
                                 title = "播放历史",
                                 emptyText = "还没有播放记录",
                                 entries = frozenHistory ?: history,
-                                modifier = Modifier.padding(padding),
+                                modifier = Modifier.fillMaxSize(),
+                                navigationPadding = padding,
                                 onVideo = { video ->
                                     frozenHistory = history
                                     openVideo(video)
@@ -1358,6 +1360,7 @@ private fun LibraryScreen(
     emptyText: String,
     entries: List<LibraryEntity>,
     modifier: Modifier,
+    navigationPadding: androidx.compose.foundation.layout.PaddingValues,
     onVideo: (Video) -> Unit,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
@@ -1378,13 +1381,26 @@ private fun LibraryScreen(
         },
     ) { padding ->
         if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { Text(emptyText) }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(
+                        top = padding.calculateTopPadding(),
+                        bottom = navigationPadding.calculateBottomPadding(),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) { Text(emptyText) }
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(112.dp),
                 state = gridState,
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 16.dp,
+                    top = padding.calculateTopPadding() + 16.dp,
+                    end = 16.dp,
+                    bottom = navigationPadding.calculateBottomPadding() + 16.dp,
+                ),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
