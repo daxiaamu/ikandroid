@@ -8,4 +8,9 @@
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <item name="android:colorAccent">#6750A4</item>
     </style>
+
+    <!-- Older Android versions do not need a decorative preview window. -->
+    <style name="Theme.IKan.Starting" parent="Theme.IKan">
+        <item name="android:windowDisablePreview">true</item>
+    </style>
 </resources>
