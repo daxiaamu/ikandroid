@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.isFile) file.inputStream().use(::load)
+}
+
+fun releaseProperty(name: String): String? =
+    providers.gradleProperty(name).orNull
+        ?: providers.environmentVariable(name).orNull
+        ?: localProperties.getProperty(name)
 
 android {
     namespace = "com.ikan.app"
@@ -12,8 +24,8 @@ android {
         applicationId = "com.ikan.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.0.9"
+        versionCode = 11
+        versionName = "1.0.10"
         val githubUrl = providers.gradleProperty("IKAN_GITHUB_URL").orElse("").get()
         val authorUrl = providers.gradleProperty("IKAN_AUTHOR_URL").orElse("").get()
         val updateJsonUrl = providers.gradleProperty("IKAN_UPDATE_JSON_URL")
@@ -40,6 +52,15 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
+    signingConfigs {
+        create("release") {
+            releaseProperty("IKAN_RELEASE_STORE_FILE")?.let { storeFile = rootProject.file(it) }
+            storePassword = releaseProperty("IKAN_RELEASE_STORE_PASSWORD")
+            keyAlias = releaseProperty("IKAN_RELEASE_KEY_ALIAS")
+            keyPassword = releaseProperty("IKAN_RELEASE_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -48,9 +69,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // Keep update compatibility with the currently distributed builds while producing
-            // an optimized, non-debuggable APK. Move to a private release key before wider use.
-            signingConfig = signingConfigs.getByName("debug")
+            // Never silently fall back to a machine-specific debug key: that would make updates
+            // incompatible with already installed versions.
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
