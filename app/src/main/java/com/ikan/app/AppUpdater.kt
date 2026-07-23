@@ -1,12 +1,20 @@
 package com.ikan.app
 
 import android.app.DownloadManager
+import android.app.Activity
+import android.app.ActivityManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
+import android.os.Build
+import android.os.Bundle
 import android.util.Base64
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -97,14 +105,13 @@ class AppUpdater(private val context: Context) {
     fun download(info: UpdateInfo): Long {
         check(info.apkUrl.isNotBlank()) { "该 Release 没有 APK 附件" }
         val manager = context.getSystemService(DownloadManager::class.java)
-        val version = info.version.removePrefix("v")
-        val fileName = "ikandroid-$version.apk"
         val request = DownloadManager.Request(Uri.parse(info.apkUrl))
             .setTitle("爱看")
-            .setDescription("正在下载更新，完成后将打开安装界面")
+            .setDescription("正在下载更新，完成后将提示安装")
             .setMimeType(APK_MIME)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName)
+        // Let DownloadManager own the file and expose it through a content URI. Writing a
+        // DownloadManager entry into Android/data is rejected by some Android 15/16 builds.
         return manager.enqueue(request).also { id ->
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_DOWNLOAD, id).apply()
         }
@@ -113,6 +120,7 @@ class AppUpdater(private val context: Context) {
     companion object {
         const val PREFS = "app_update"
         const val KEY_DOWNLOAD = "download_id"
+        const val KEY_READY_DOWNLOAD = "ready_download_id"
         const val APK_MIME = "application/vnd.android.package-archive"
     }
 }
@@ -124,12 +132,149 @@ class UpdateDownloadReceiver : BroadcastReceiver() {
             .getLong(AppUpdater.KEY_DOWNLOAD, -1L)
         val completed = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
         if (expected < 0 || completed != expected) return
+        if (!UpdateInstaller.isSuccessful(context, completed)) return
+
+        UpdateInstaller.markReady(context, completed)
+        UpdateInstaller.showInstallNotification(context, completed)
+        if (UpdateInstaller.isAppForeground()) {
+            UpdateInstallActivity.open(context, completed)
+        }
+    }
+}
+
+/**
+ * Android 10+ blocks background broadcast receivers from opening activities. Keep a pending
+ * install until the app is foreground again and always provide a user-initiated notification.
+ */
+object UpdateInstaller {
+    private const val CHANNEL_ID = "app_update_install"
+    private const val NOTIFICATION_ID = 0x494B
+
+    fun markReady(context: Context, downloadId: Long) {
+        context.getSharedPreferences(AppUpdater.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(AppUpdater.KEY_READY_DOWNLOAD, downloadId)
+            .apply()
+    }
+
+    fun pending(context: Context): Long =
+        context.getSharedPreferences(AppUpdater.PREFS, Context.MODE_PRIVATE)
+            .getLong(AppUpdater.KEY_READY_DOWNLOAD, -1L)
+
+    fun pendingOrCompleted(context: Context): Long {
+        pending(context).takeIf { it >= 0 }?.let { return it }
+        val downloadId = context.getSharedPreferences(AppUpdater.PREFS, Context.MODE_PRIVATE)
+            .getLong(AppUpdater.KEY_DOWNLOAD, -1L)
+        if (downloadId >= 0 && isSuccessful(context, downloadId)) {
+            markReady(context, downloadId)
+            return downloadId
+        }
+        return -1L
+    }
+
+    fun isSuccessful(context: Context, downloadId: Long): Boolean {
         val manager = context.getSystemService(DownloadManager::class.java)
-        val uri = manager.getUriForDownloadedFile(completed) ?: return
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, AppUpdater.APK_MIME)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION),
+        return runCatching {
+            manager.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
+                cursor.moveToFirst() &&
+                    cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) ==
+                    DownloadManager.STATUS_SUCCESSFUL &&
+                    manager.getUriForDownloadedFile(downloadId) != null
+            }
+        }.getOrDefault(false)
+    }
+
+    fun clear(context: Context, downloadId: Long) {
+        val preferences = context.getSharedPreferences(AppUpdater.PREFS, Context.MODE_PRIVATE)
+        val editor = preferences.edit()
+        if (preferences.getLong(AppUpdater.KEY_READY_DOWNLOAD, -1L) == downloadId) {
+            editor.remove(AppUpdater.KEY_READY_DOWNLOAD)
+        }
+        if (preferences.getLong(AppUpdater.KEY_DOWNLOAD, -1L) == downloadId) {
+            editor.remove(AppUpdater.KEY_DOWNLOAD)
+        }
+        editor.apply()
+        context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+    }
+
+    fun isAppForeground(): Boolean {
+        val state = ActivityManager.RunningAppProcessInfo()
+        ActivityManager.getMyMemoryState(state)
+        return state.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+    }
+
+    fun showInstallNotification(context: Context, downloadId: Long) {
+        val notifications = context.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notifications.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "应用更新",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "新版本下载完成后的安装提示"
+                },
+            )
+        }
+        val action = PendingIntent.getActivity(
+            context,
+            NOTIFICATION_ID,
+            UpdateInstallActivity.intent(context, downloadId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        notifications.notify(
+            NOTIFICATION_ID,
+            NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("爱看")
+                .setContentText("更新已下载，点击安装")
+                .setContentIntent(action)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_SYSTEM)
+                .build(),
+        )
+    }
+
+    fun launchInstaller(activity: Activity, downloadId: Long): Boolean {
+        val manager = activity.getSystemService(DownloadManager::class.java)
+        val uri = manager.getUriForDownloadedFile(downloadId) ?: return false
+        return try {
+            activity.startActivity(
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, AppUpdater.APK_MIME)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            )
+            clear(activity, downloadId)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+}
+
+class UpdateInstallActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val downloadId = intent.getLongExtra(EXTRA_DOWNLOAD_ID, UpdateInstaller.pending(this))
+        if (downloadId >= 0) {
+            UpdateInstaller.launchInstaller(this, downloadId)
+        }
+        finish()
+    }
+
+    companion object {
+        private const val EXTRA_DOWNLOAD_ID = "download_id"
+
+        fun intent(context: Context, downloadId: Long): Intent =
+            Intent(context, UpdateInstallActivity::class.java)
+                .putExtra(EXTRA_DOWNLOAD_ID, downloadId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+        fun open(context: Context, downloadId: Long) {
+            context.startActivity(intent(context, downloadId))
+        }
     }
 }

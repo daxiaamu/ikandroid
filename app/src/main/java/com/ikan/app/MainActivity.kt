@@ -242,6 +242,18 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    override fun onResume() {
+        super.onResume()
+        val pendingUpdate = UpdateInstaller.pendingOrCompleted(this)
+        if (pendingUpdate >= 0) {
+            window.decorView.post {
+                if (!isFinishing && !isDestroyed) {
+                    UpdateInstallActivity.open(this, pendingUpdate)
+                }
+            }
+        }
+    }
+
     override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(inPip, newConfig)
         pipState.value = inPip
