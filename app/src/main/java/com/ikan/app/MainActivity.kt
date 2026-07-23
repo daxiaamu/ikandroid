@@ -141,17 +141,22 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.platform.LocalConfiguration
@@ -163,6 +168,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -310,6 +316,27 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     SETTINGS("设置", Icons.Default.Settings),
 }
 
+@Composable
+private fun Modifier.keepHorizontalScrollInChild(): Modifier {
+    val connection = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset = if (source == NestedScrollSource.UserInput) {
+                Offset(available.x, 0f)
+            } else {
+                Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+                Velocity(available.x, 0f)
+        }
+    }
+    return nestedScroll(connection)
+}
+
 private data class Playing(val line: PlayLine, val episode: PlayEpisode, val startPosition: Long = 0)
 
 private data class PlayerPresentation(
@@ -346,7 +373,7 @@ private fun IKanApp(
     val appScope = rememberCoroutineScope()
     val homeListState = rememberLazyListState()
     val homeGridState = rememberLazyGridState()
-    val homeSectionStates = remember { mutableMapOf<String, LazyListState>() }
+    val homeSectionPositions = remember { mutableMapOf<String, Pair<Int, Int>>() }
     val favoritesGridState = rememberLazyGridState()
     val historyGridState = rememberLazyGridState()
 
@@ -437,7 +464,7 @@ private fun IKanApp(
                             sharedTitleModifier,
                             homeListState,
                             homeGridState,
-                            homeSectionStates,
+                            homeSectionPositions,
                         )
                         MainTab.FAVORITES -> {
                             val favorites by viewModel.favorites.collectAsStateWithLifecycle()
@@ -487,7 +514,9 @@ private fun IKanApp(
                         }
                         MainTab.SETTINGS -> SettingsScreen(
                             theme = viewModel.theme.collectAsStateWithLifecycle().value,
-                            modifier = Modifier.padding(padding),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = padding.calculateBottomPadding()),
                             onTheme = viewModel::setTheme,
                         )
                     }
@@ -589,7 +618,7 @@ private fun HomeScreen(
     titleModifier: @Composable (Video) -> Modifier,
     listState: LazyListState,
     gridState: LazyGridState,
-    sectionStates: MutableMap<String, LazyListState>,
+    sectionPositions: MutableMap<String, Pair<Int, Int>>,
 ) {
     val catalog by viewModel.catalog.collectAsStateWithLifecycle()
     val category by viewModel.category.collectAsStateWithLifecycle()
@@ -682,7 +711,9 @@ private fun HomeScreen(
             }
         }
         LazyRow(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .keepHorizontalScrollInChild(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -701,7 +732,7 @@ private fun HomeScreen(
             titleModifier = titleModifier,
             listState = listState,
             gridState = gridState,
-            sectionStates = sectionStates,
+            sectionPositions = sectionPositions,
             cardWidth = cardWidth,
             gridMinWidth = gridMinWidth,
             horizontalPadding = horizontalPadding,
@@ -721,7 +752,7 @@ private fun CatalogContent(
     titleModifier: @Composable (Video) -> Modifier,
     listState: LazyListState,
     gridState: LazyGridState,
-    sectionStates: MutableMap<String, LazyListState>,
+    sectionPositions: MutableMap<String, Pair<Int, Int>>,
     cardWidth: androidx.compose.ui.unit.Dp,
     gridMinWidth: androidx.compose.ui.unit.Dp,
     horizontalPadding: androidx.compose.ui.unit.Dp,
@@ -740,8 +771,24 @@ private fun CatalogContent(
                         item { SectionTitle(section.title) }
                         item {
                             val sectionKey = "${page.title}:$index:${section.title}"
+                            val savedPosition = sectionPositions[sectionKey] ?: (0 to 0)
+                            val sectionState = remember(sectionKey) {
+                                LazyListState(
+                                    firstVisibleItemIndex = savedPosition.first,
+                                    firstVisibleItemScrollOffset = savedPosition.second,
+                                )
+                            }
+                            LaunchedEffect(sectionKey, sectionState) {
+                                snapshotFlow {
+                                    sectionState.firstVisibleItemIndex to
+                                        sectionState.firstVisibleItemScrollOffset
+                                }.collect { sectionPositions[sectionKey] = it }
+                            }
                             LazyRow(
-                                state = sectionStates.getOrPut(sectionKey) { LazyListState() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .keepHorizontalScrollInChild(),
+                                state = sectionState,
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
@@ -787,6 +834,9 @@ private fun CatalogGrid(
     Column(Modifier.fillMaxSize()) {
         if (page.filters.isNotEmpty()) {
             LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .keepHorizontalScrollInChild(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
