@@ -1507,7 +1507,15 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
         AlertDialog(
             onDismissRequest = { availableUpdate = null },
             title = { Text("发现新版本 ${info.version}") },
-            text = { Text(info.name.ifBlank { "GitHub Release ${info.version}" }) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(info.name.ifBlank { "GitHub Release ${info.version}" })
+                    if (info.notes.isNotBlank()) {
+                        Text("更新内容", style = MaterialTheme.typography.titleSmall)
+                        Text(info.notes)
+                    }
+                }
+            },
             dismissButton = {
                 TextButton(onClick = { availableUpdate = null }) { Text("稍后") }
             },

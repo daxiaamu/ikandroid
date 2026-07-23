@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 data class UpdateInfo(
     val version: String,
     val name: String,
+    val notes: String,
     val releaseUrl: String,
     val apkUrl: String,
 )
@@ -42,6 +43,11 @@ class AppUpdater(private val context: Context) {
         UpdateInfo(
             version = version,
             name = json.optString("name").ifBlank { tag },
+            notes = json.optString("notes")
+                .lineSequence()
+                .map(String::trim)
+                .filter { it.isNotBlank() && !it.startsWith("#") }
+                .joinToString("\n") { if (it.startsWith("- ")) "• ${it.drop(2)}" else it },
             releaseUrl = json.optString("releaseUrl"),
             apkUrl = json.optString("apkUrl"),
         )

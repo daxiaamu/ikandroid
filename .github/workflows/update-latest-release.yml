@@ -23,6 +23,7 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name }}
           NAME: ${{ github.event.release.name }}
+          NOTES: ${{ github.event.release.body }}
           PUBLISHED_AT: ${{ github.event.release.published_at }}
           RELEASE_URL: ${{ github.event.release.html_url }}
           ASSETS_JSON: ${{ toJson(github.event.release.assets) }}
@@ -32,10 +33,11 @@ jobs:
             --arg tag "$TAG" \
             --arg versionName "${TAG#v}" \
             --arg name "$NAME" \
+            --arg notes "$NOTES" \
             --arg publishedAt "$PUBLISHED_AT" \
             --arg releaseUrl "$RELEASE_URL" \
             --arg apkUrl "$APK_URL" \
-            '{tag: $tag, versionName: $versionName, name: $name, publishedAt: $publishedAt, releaseUrl: $releaseUrl, apkUrl: $apkUrl}' \
+            '{tag: $tag, versionName: $versionName, name: $name, notes: $notes, publishedAt: $publishedAt, releaseUrl: $releaseUrl, apkUrl: $apkUrl}' \
             > latest-release.json
 
       - name: Commit update
