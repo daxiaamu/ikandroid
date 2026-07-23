@@ -97,10 +97,11 @@ class AppUpdater(private val context: Context) {
     fun download(info: UpdateInfo): Long {
         check(info.apkUrl.isNotBlank()) { "该 Release 没有 APK 附件" }
         val manager = context.getSystemService(DownloadManager::class.java)
-        val fileName = "ikandroid-${info.version}.apk"
+        val version = info.version.removePrefix("v")
+        val fileName = "ikandroid-$version.apk"
         val request = DownloadManager.Request(Uri.parse(info.apkUrl))
-            .setTitle("爱看 ${info.version}")
-            .setDescription("下载完成后将打开系统安装界面")
+            .setTitle("爱看")
+            .setDescription("正在下载更新，完成后将打开安装界面")
             .setMimeType(APK_MIME)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName)
