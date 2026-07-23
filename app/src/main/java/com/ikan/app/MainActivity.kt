@@ -292,6 +292,7 @@ private fun IKanApp(
     val appScope = rememberCoroutineScope()
     val homeListState = rememberLazyListState()
     val homeGridState = rememberLazyGridState()
+    val homeSectionStates = remember { mutableMapOf<String, LazyListState>() }
     val favoritesGridState = rememberLazyGridState()
     val historyGridState = rememberLazyGridState()
 
@@ -372,6 +373,7 @@ private fun IKanApp(
                             sharedTitleModifier,
                             homeListState,
                             homeGridState,
+                            homeSectionStates,
                         )
                         MainTab.FAVORITES -> {
                             val favorites by viewModel.favorites.collectAsStateWithLifecycle()
@@ -470,6 +472,7 @@ private fun HomeScreen(
     titleModifier: @Composable (Video) -> Modifier,
     listState: LazyListState,
     gridState: LazyGridState,
+    sectionStates: MutableMap<String, LazyListState>,
 ) {
     val catalog by viewModel.catalog.collectAsStateWithLifecycle()
     val category by viewModel.category.collectAsStateWithLifecycle()
@@ -549,6 +552,7 @@ private fun HomeScreen(
             titleModifier = titleModifier,
             listState = listState,
             gridState = gridState,
+            sectionStates = sectionStates,
             onFilter = viewModel::loadPath,
             onNext = { path -> viewModel.loadPath(path, catalog.page?.title ?: category.label) },
             onRetry = { viewModel.loadCategory(category) },
@@ -564,6 +568,7 @@ private fun CatalogContent(
     titleModifier: @Composable (Video) -> Modifier,
     listState: LazyListState,
     gridState: LazyGridState,
+    sectionStates: MutableMap<String, LazyListState>,
     onFilter: (String, String) -> Unit,
     onNext: (String) -> Unit,
     onRetry: () -> Unit,
@@ -575,10 +580,12 @@ private fun CatalogContent(
             val page = state.page
             if (page.sections.isNotEmpty()) {
                 LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                    page.sections.forEach { section ->
+                    page.sections.forEachIndexed { index, section ->
                         item { SectionTitle(section.title) }
                         item {
+                            val sectionKey = "${page.title}:$index:${section.title}"
                             LazyRow(
+                                state = sectionStates.getOrPut(sectionKey) { LazyListState() },
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
