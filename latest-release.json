@@ -1,9 +1,9 @@
 {
-  "tag": "v1.0.12",
-  "versionName": "1.0.12",
-  "name": "爱看 1.0.12",
-  "notes": "- 修复首页横向影视列表在切换页面后可滚动内容变少的问题。\r\n- 保留首页横向列表的浏览位置，返回首页后可从原处继续浏览。\r\n- 优化横向列表与底部页面滑动的手势边界，减少误切换。\r\n- 统一设置页与收藏、播放历史、缓存页面的标题布局。",
-  "publishedAt": "2026-07-23T19:53:34Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.12",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.12/app-release.apk"
+  "tag": "v1.0.13",
+  "versionName": "1.0.13",
+  "name": "爱看 1.0.13",
+  "notes": "- 优化首页横向影视列表的滑动体验，保留自然回弹并减少卡顿与误切换。\r\n- 统一页面左右滑动的切换距离与速度判定，操作更加跟手。\r\n- 修复连续滑动后立即反向时，页面偶尔仍向原方向移动的问题。\r\n- 优化手机与平板上的页面切换一致性。",
+  "publishedAt": "2026-07-23T21:35:41Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.0.13",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.0.13/app-release.apk"
 }
