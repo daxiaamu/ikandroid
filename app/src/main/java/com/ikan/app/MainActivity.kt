@@ -318,6 +318,10 @@ private fun IKanApp(
                     placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
                 )
             }
+            val navigationOverlayModifier = Modifier.renderInSharedTransitionScopeOverlay(
+                zIndexInOverlay = 10f,
+                renderInOverlay = { detailId == null && isTransitionActive },
+            )
             if (id != null) {
                 DetailRoute(
                     videoId = id,
@@ -343,6 +347,7 @@ private fun IKanApp(
                 MainTabs(
                     selected = tab,
                     onSelected = { tab = it },
+                    navigationModifier = navigationOverlayModifier,
                 ) { padding ->
                     when (tab) {
                         MainTab.HOME -> HomeScreen(viewModel, padding, ::openVideo, sharedPosterModifier, sharedTitleModifier)
@@ -387,13 +392,14 @@ private fun IKanApp(
 private fun MainTabs(
     selected: MainTab,
     onSelected: (MainTab) -> Unit,
+    navigationModifier: Modifier = Modifier,
     content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 840.dp
         if (wide) {
             Row(Modifier.fillMaxSize()) {
-                NavigationRail(Modifier.fillMaxHeight().navigationBarsPadding().statusBarsPadding()) {
+                NavigationRail(navigationModifier.fillMaxHeight().navigationBarsPadding().statusBarsPadding()) {
                     MainTab.entries.forEach { tab ->
                         NavigationRailItem(
                             selected = selected == tab,
@@ -410,7 +416,7 @@ private fun MainTabs(
         } else {
             Scaffold(
                 bottomBar = {
-                    NavigationBar {
+                    NavigationBar(navigationModifier) {
                         MainTab.entries.forEach { tab ->
                             NavigationBarItem(
                                 selected = selected == tab,
