@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.util.Rational
 import android.view.ViewGroup
 import android.view.View
+import android.view.LayoutInflater
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -282,6 +283,7 @@ private fun IKanApp(
     var tab by rememberSaveable { mutableStateOf(MainTab.HOME) }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     var detailVideo by remember { mutableStateOf<Video?>(null) }
+    var frozenHistory by remember { mutableStateOf<List<LibraryEntity>?>(null) }
     val appScope = rememberCoroutineScope()
 
     fun openVideo(video: Video) {
@@ -339,7 +341,10 @@ private fun IKanApp(
                         // the retained catalog card. Clearing it immediately removes the source.
                         appScope.launch {
                             delay(340)
-                            if (detailId == null) viewModel.closeDetail()
+                            if (detailId == null) {
+                                viewModel.closeDetail()
+                                frozenHistory = null
+                            }
                         }
                     },
                 )
@@ -368,9 +373,12 @@ private fun IKanApp(
                             LibraryScreen(
                                 title = "播放历史",
                                 emptyText = "还没有播放记录",
-                                entries = history,
+                                entries = frozenHistory ?: history,
                                 modifier = Modifier.padding(padding),
-                                onVideo = ::openVideo,
+                                onVideo = { video ->
+                                    frozenHistory = history
+                                    openVideo(video)
+                                },
                                 posterModifier = sharedPosterModifier,
                                 titleModifier = sharedTitleModifier,
                                 onClear = viewModel::clearHistory,
@@ -1067,7 +1075,7 @@ private fun NativePlayer(
         Box(Modifier.fillMaxSize()) {
             AndroidView(
                 factory = { ctx ->
-                    GesturePlayerView(ctx).apply {
+                    (LayoutInflater.from(ctx).inflate(R.layout.player_view, null, false) as GesturePlayerView).apply {
                         this.player = player
                         onGestureFeedback = { gestureFeedback = it }
                         setControllerVisibilityListener(
@@ -1345,7 +1353,7 @@ private fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 items(entries, key = { it.videoId }) { entry ->
-                    Column {
+                    Column(Modifier.animateItem()) {
                         VideoCard(
                             Video(entry.videoId, entry.title, entry.poster),
                             onVideo,
