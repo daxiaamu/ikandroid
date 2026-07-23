@@ -282,6 +282,7 @@ private fun IKanApp(
     var tab by rememberSaveable { mutableStateOf(MainTab.HOME) }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     var detailVideo by remember { mutableStateOf<Video?>(null) }
+    val appScope = rememberCoroutineScope()
 
     fun openVideo(video: Video) {
         detailVideo = video
@@ -294,7 +295,7 @@ private fun IKanApp(
             targetState = detailId,
             transitionSpec = {
                 if (targetState == null) {
-                    fadeIn(tween(220)) togetherWith fadeOut(tween(220))
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(1))
                 } else {
                     fadeIn(tween(220)) togetherWith fadeOut(tween(1))
                 }
@@ -330,7 +331,12 @@ private fun IKanApp(
                     configureAutoPip = configureAutoPip,
                     onBack = {
                         detailId = null
-                        viewModel.closeDetail()
+                        // Keep the outgoing detail tree alive until its poster/title have reached
+                        // the retained catalog card. Clearing it immediately removes the source.
+                        appScope.launch {
+                            delay(340)
+                            if (detailId == null) viewModel.closeDetail()
+                        }
                     },
                 )
             } else {
