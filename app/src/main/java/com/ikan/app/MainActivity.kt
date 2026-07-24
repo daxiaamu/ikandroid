@@ -2070,10 +2070,6 @@ private fun NativePlayer(
                         .align(if (fullscreen) Alignment.TopCenter else Alignment.TopEnd)
                         .zIndex(4f)
                         .then(if (fullscreen) Modifier.fillMaxWidth() else Modifier)
-                        .background(
-                            androidx.compose.ui.graphics.Color.Black.copy(alpha = if (fullscreen) 0.55f else 0.4f),
-                            if (fullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(bottomStart = 12.dp),
-                        )
                         .height(if (fullscreen) 56.dp else 48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -2086,10 +2082,6 @@ private fun NativePlayer(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .zIndex(4f)
-                        .background(
-                            androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f),
-                            RoundedCornerShape(topStart = 12.dp),
-                        )
                         .height(48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -2655,6 +2647,20 @@ private fun SettingsScreen(
                     "检查更新",
                     if (checkingUpdate) "正在检查更新…" else "当前版本 ${BuildConfig.VERSION_NAME}",
                     clickable = !checkingUpdate,
+                    trailingContent = {
+                        if (checkingUpdate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Text(
+                                "检查",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
+                    },
                 ) {
                     checkingUpdate = true
                     scope.launch {
@@ -2902,6 +2908,7 @@ private fun SettingsRow(
     subtitle: String,
     external: Boolean = false,
     clickable: Boolean = true,
+    trailingContent: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     ListItem(
@@ -2909,8 +2916,11 @@ private fun SettingsRow(
         supportingContent = { Text(subtitle, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         leadingContent = { Icon(icon, null) },
         trailingContent = {
-            if (external) Icon(Icons.Default.OpenInNew, "打开外部链接", Modifier.size(18.dp))
-            else if (clickable) Text("›", style = MaterialTheme.typography.titleLarge)
+            when {
+                trailingContent != null -> trailingContent()
+                external -> Icon(Icons.Default.OpenInNew, "打开外部链接", Modifier.size(18.dp))
+                clickable -> Text("›", style = MaterialTheme.typography.titleLarge)
+            }
         },
         modifier = if (clickable) Modifier.clickable(onClick = onClick) else Modifier,
     )
