@@ -1,9 +1,9 @@
 {
-  "tag": "v1.2.1",
-  "versionName": "1.2.1",
-  "name": "爱看 1.2.1",
-  "notes": "- 统一播放器控制区域的视觉层次，操作界面更加简洁连贯。\n- 优化检查更新入口与状态反馈，操作含义更加清晰。",
-  "publishedAt": "2026-07-24T06:18:35Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.2.1",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.2.1/-1.2.1.apk"
+  "tag": "v1.2.2",
+  "versionName": "1.2.2",
+  "name": "爱看 1.2.2",
+  "notes": "- 优化播放器进度条的拖动区域，上下触控手感更加一致。\n- 优化更新下载通知，下载完成后及时退出系统进度通知。",
+  "publishedAt": "2026-07-24T06:35:33Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.2.2",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.2.2/ikan-1.2.2.apk"
 }
