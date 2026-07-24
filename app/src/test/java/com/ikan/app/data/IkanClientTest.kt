@@ -53,4 +53,21 @@ class IkanClientTest {
         assertEquals(listOf("热门", "最新"), page.filters.map { it.label })
         assertEquals(listOf(true, false), page.filters.map { it.selected })
     }
+
+    @Test
+    fun catalogParsesPreviousAndNextPages() {
+        val html = """
+            <h5>电影</h5>
+            <a href="/play/123"><img alt="测试" src="https://img.test/a.jpg"></a>
+            <nav>
+              <a href="/hot/movie/page-1.html">上一页</a>
+              <a href="/hot/movie/page-3.html">下一页</a>
+            </nav>
+        """.trimIndent()
+
+        val page = client.parseCatalog(html, "电影", false)
+
+        assertEquals("/hot/movie/page-1.html", page.previousPath)
+        assertEquals("/hot/movie/page-3.html", page.nextPath)
+    }
 }

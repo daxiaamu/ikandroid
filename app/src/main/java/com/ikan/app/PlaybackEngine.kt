@@ -74,8 +74,8 @@ class PlaybackEngine(context: Context) {
     private val cacheFactory = CacheDataSource.Factory()
         .setCache(mediaCache)
         .setUpstreamDataSourceFactory(upstreamFactory)
-        // Only explicit downloads write to the permanent cache. Normal streaming remains bounded
-        // by ExoPlayer's memory buffer and can still read data already downloaded in the background.
+        // Explicit downloads are persistent. Normal playback reads them but does not silently
+        // turn every watched stream into an unbounded offline download.
         .setCacheWriteDataSinkFactory(null)
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     private val _downloads = MutableStateFlow<List<CachedEpisode>>(emptyList())

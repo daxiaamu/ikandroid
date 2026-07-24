@@ -110,8 +110,15 @@ class IkanClient(
             )
         }.distinctBy { it.path }
         val title = doc.selectFirst("h4, h5")?.ownText()?.trim().orEmpty().ifBlank { fallbackTitle }
+        val previous = doc.select("a[href]").firstOrNull { it.text().contains("上一页") }?.attr("href")
         val next = doc.select("a[href]").firstOrNull { it.text().contains("下一页") }?.attr("href")
-        return CatalogPage(title, filters, parseVideos(doc), nextPath = next)
+        return CatalogPage(
+            title = title,
+            filters = filters,
+            videos = parseVideos(doc),
+            previousPath = previous,
+            nextPath = next,
+        )
     }
 
     private fun parseVideos(root: Element): List<Video> = root.select("a[href^=/play/]")

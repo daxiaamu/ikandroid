@@ -2,6 +2,7 @@ package com.ikan.app
 
 import android.Manifest
 import android.app.PictureInPictureParams
+import android.app.WallpaperManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -11,6 +12,8 @@ import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Rational
 import android.view.ViewGroup
 import android.view.View
@@ -221,14 +224,23 @@ import com.ikan.app.model.ThemeMode
 import com.ikan.app.model.Video
 import com.materialkolor.dynamicColorScheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     private val pipState = mutableStateOf(false)
     private val pipReturningState = mutableStateOf(false)
     private val paletteRevision = mutableStateOf(0)
+    private val wallpaperSeedColor = mutableStateOf<Int?>(null)
+    private lateinit var wallpaperManager: WallpaperManager
+    private val wallpaperColorsListener = WallpaperManager.OnColorsChangedListener { colors, which ->
+        if (which and WallpaperManager.FLAG_SYSTEM != 0) {
+            updateWallpaperSeedColor(colors?.primaryColor?.toArgb())
+        }
+    }
     private var pipSourceRect: Rect? = null
     private var autoPipEnabled = false
     private var pipReturnJob: Job? = null
@@ -238,13 +250,31 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        getSharedPreferences(THEME_CACHE, Context.MODE_PRIVATE).let { cache ->
+            if (cache.contains(WALLPAPER_SEED)) {
+                wallpaperSeedColor.value = cache.getInt(WALLPAPER_SEED, 0)
+            }
+        }
+        wallpaperManager = WallpaperManager.getInstance(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            wallpaperManager.addOnColorsChangedListener(
+                wallpaperColorsListener,
+                Handler(Looper.getMainLooper()),
+            )
+        }
         setContent {
             val app = application as IKanApplication
             val viewModel: MainViewModel = viewModel(factory = MainViewModel.factory(app))
             val theme by viewModel.theme.collectAsStateWithLifecycle()
             val dynamicColor by viewModel.dynamicColor.collectAsStateWithLifecycle()
             val customThemeColor by viewModel.customThemeColor.collectAsStateWithLifecycle()
-            IKanTheme(theme, dynamicColor, customThemeColor, paletteRevision.value) {
+            IKanTheme(
+                theme,
+                dynamicColor,
+                customThemeColor,
+                wallpaperSeedColor.value,
+                paletteRevision.value,
+            ) {
                 IKanApp(
                     viewModel = viewModel,
                     isPip = pipState.value,
@@ -267,6 +297,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         window.decorView.removeCallbacks(warmPlayback)
+        if (::wallpaperManager.isInitialized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            wallpaperManager.removeOnColorsChangedListener(wallpaperColorsListener)
+        }
         playbackPlayer?.release()
         playbackPlayer = null
         super.onDestroy()
@@ -277,6 +310,7 @@ class MainActivity : ComponentActivity() {
         // Some vendor systems update Monet overlays without dispatching a configuration that
         // Compose observes. Re-read the system palette whenever the app returns to foreground.
         paletteRevision.value++
+        refreshWallpaperSeedColor()
         val pendingUpdate = UpdateInstaller.pendingOrCompleted(this)
         if (pendingUpdate >= 0) {
             window.decorView.post {
@@ -285,6 +319,37 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun refreshWallpaperSeedColor() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) {
+            wallpaperSeedColor.value = null
+            return
+        }
+        lifecycleScope.launch {
+            val seedColor = withContext(Dispatchers.IO) {
+                runCatching {
+                    wallpaperManager
+                        .getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+                        ?.primaryColor
+                        ?.toArgb()
+                }.getOrNull()
+            }
+            updateWallpaperSeedColor(seedColor)
+        }
+    }
+
+    private fun updateWallpaperSeedColor(seedColor: Int?) {
+        if (wallpaperSeedColor.value == seedColor) return
+        wallpaperSeedColor.value = seedColor
+        getSharedPreferences(THEME_CACHE, Context.MODE_PRIVATE).edit().apply {
+            if (seedColor == null) remove(WALLPAPER_SEED) else putInt(WALLPAPER_SEED, seedColor)
+        }.apply()
+    }
+
+    private companion object {
+        const val THEME_CACHE = "theme_cache"
+        const val WALLPAPER_SEED = "wallpaper_seed"
     }
 
     override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
@@ -383,6 +448,7 @@ private data class PlayerPresentation(
     val onCacheEpisode: () -> Unit,
     val onCacheLine: () -> Unit,
     val onPlaybackEnded: () -> Unit,
+    val onEpisodeChanged: (String) -> Unit,
     val onProgress: (Long, Long) -> Unit,
 )
 
@@ -413,6 +479,7 @@ private fun IKanApp(
         animationSpec = tween(320),
         label = "页面前景透明度",
     )
+    val detailChromeAlpha = 1f - transitionChromeAlpha
 
     fun openVideo(video: Video) {
         requestedCachedEpisode = null
@@ -519,7 +586,7 @@ private fun IKanApp(
             val detailTopBarModifier = Modifier.renderInSharedTransitionScopeOverlay(
                 zIndexInOverlay = 20f,
                 renderInOverlay = { isTransitionActive },
-            )
+            ).alpha(detailChromeAlpha)
             if (id != null) {
                 DetailRoute(
                     videoId = id,
@@ -948,7 +1015,7 @@ private fun HomeScreen(
             horizontalPadding = horizontalPadding,
             transitionChromeModifier = transitionChromeModifier,
             onFilter = viewModel::loadPath,
-            onNext = { path -> viewModel.loadPath(path, catalog.page?.title ?: category.label) },
+            onPage = { path -> viewModel.loadPath(path, catalog.page?.title ?: category.label) },
             onRetry = { viewModel.loadCategory(category) },
         )
         }
@@ -969,7 +1036,7 @@ private fun CatalogContent(
     horizontalPadding: androidx.compose.ui.unit.Dp,
     transitionChromeModifier: Modifier,
     onFilter: (String, String) -> Unit,
-    onNext: (String) -> Unit,
+    onPage: (String) -> Unit,
     onRetry: () -> Unit,
 ) {
     when {
@@ -1024,7 +1091,7 @@ private fun CatalogContent(
                     horizontalPadding,
                     transitionChromeModifier,
                     onFilter,
-                    onNext,
+                    onPage,
                 )
             }
         }
@@ -1043,7 +1110,7 @@ private fun CatalogGrid(
     horizontalPadding: androidx.compose.ui.unit.Dp,
     transitionChromeModifier: Modifier,
     onFilter: (String, String) -> Unit,
-    onNext: (String) -> Unit,
+    onPage: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         if (page.filters.isNotEmpty()) {
@@ -1076,10 +1143,31 @@ private fun CatalogGrid(
             items(page.videos, key = { it.id }) {
                 VideoCard(it, onVideo, posterModifier = posterModifier, titleModifier = titleModifier)
             }
-            page.nextPath?.let { path ->
-                item {
-                    Button(onClick = { onNext(path) }, enabled = !loading) {
-                        Text(if (loading) "加载中" else "下一页")
+            if (page.previousPath != null || page.nextPath != null) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        page.previousPath?.let { path ->
+                            OutlinedButton(
+                                onClick = { onPage(path) },
+                                enabled = !loading,
+                            ) {
+                                Text("上一页")
+                            }
+                        }
+                        if (page.previousPath != null && page.nextPath != null) {
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        page.nextPath?.let { path ->
+                            Button(
+                                onClick = { onPage(path) },
+                                enabled = !loading,
+                            ) {
+                                Text(if (loading) "加载中" else "下一页")
+                            }
+                        }
                     }
                 }
             }
@@ -1194,6 +1282,7 @@ private fun DetailRoute(
         )
     }
     var autoResumed by remember(videoId) { mutableStateOf(false) }
+    var endedEpisodeUrl by remember(videoId) { mutableStateOf<String?>(null) }
     var explicitFullscreen by rememberSaveable(videoId) { mutableStateOf(false) }
     val player = remember(videoId) { activity.obtainPlaybackPlayer() }
     val fullscreen = explicitFullscreen || (isLandscape && !tabletWindow)
@@ -1201,8 +1290,9 @@ private fun DetailRoute(
     DisposableEffect(player) {
         onDispose {
             configureAutoPip(false)
-            player.stop()
-            player.clearMediaItems()
+            // Keep the process-wide player and its already loaded buffer warm. Reopening the same
+            // episode can resume immediately; a different episode replaces the item below.
+            player.pause()
         }
     }
 
@@ -1219,11 +1309,27 @@ private fun DetailRoute(
                     ?: PlayEpisode(requested.episodeName, requested.url)
                 playing = Playing(line, episode, 0)
             } else if (resume?.streamUrl != null) {
-                val line = detail.lines.firstOrNull { it.id == resume.lineId }
-                    ?: PlayLine(resume.lineId.orEmpty(), "上次线路", emptyList())
-                val episode = line.episodes.firstOrNull { it.url == resume.streamUrl }
-                    ?: PlayEpisode(resume.episodeName ?: "继续播放", resume.streamUrl)
-                playing = Playing(line, episode, resume.positionMs)
+                val preferredLine = detail.lines.firstOrNull { it.id == resume.lineId }
+                val orderedLines = buildList {
+                    preferredLine?.let(::add)
+                    addAll(detail.lines.filterNot { it === preferredLine })
+                }
+                val matched = orderedLines.firstNotNullOfOrNull { line ->
+                    line.episodes.firstOrNull { it.url == resume.streamUrl }?.let { line to it }
+                } ?: resume.episodeName?.let { episodeName ->
+                    orderedLines.firstNotNullOfOrNull { line ->
+                        line.episodes.firstOrNull { it.name == episodeName }?.let { line to it }
+                    }
+                }
+                if (matched != null) {
+                    playing = Playing(matched.first, matched.second, resume.positionMs)
+                } else {
+                    val line = preferredLine
+                        ?: detail.lines.firstOrNull()
+                        ?: PlayLine(resume.lineId.orEmpty(), "上次线路", emptyList())
+                    val episode = PlayEpisode(resume.episodeName ?: "继续播放", resume.streamUrl)
+                    playing = Playing(line, episode, resume.positionMs)
+                }
             } else {
                 detail.lines.firstOrNull()?.let { line ->
                     line.episodes.firstOrNull()?.let { episode ->
@@ -1270,8 +1376,12 @@ private fun DetailRoute(
 
     fun playNextEpisode() {
         val current = activePlaying ?: return
+        if (endedEpisodeUrl == current.episode.url) return
+        endedEpisodeUrl = current.episode.url
         val currentIndex = current.line.episodes.indexOfFirst { it.url == current.episode.url }
-        val next = current.line.episodes.getOrNull(currentIndex + 1) ?: return
+            .takeIf { it >= 0 }
+            ?: current.line.episodes.indexOfFirst { it.name == current.episode.name }
+        val next = current.line.episodes.getOrNull(currentIndex + 1)
         val duration = player.duration.takeUnless { it == C.TIME_UNSET || it < 0 } ?: 0L
         viewModel.recordPlayback(
             current.line.id,
@@ -1280,8 +1390,17 @@ private fun DetailRoute(
             duration,
             duration,
         )
+        if (next == null) return
         playing = Playing(current.line, next, 0)
         viewModel.recordPlayback(current.line.id, next.name, next.url, 0, 0)
+    }
+
+    fun syncEpisodeFromPlayer(url: String) {
+        val current = playing ?: return
+        if (current.episode.url == url) return
+        val episode = current.line.episodes.firstOrNull { it.url == url } ?: return
+        playing = Playing(current.line, episode, 0)
+        viewModel.recordPlayback(current.line.id, episode.name, episode.url, 0, 0)
     }
 
     fun leaveDetail() {
@@ -1335,21 +1454,38 @@ private fun DetailRoute(
 
     LaunchedEffect(player, activePlaying?.episode?.url) {
         val current = activePlaying ?: return@LaunchedEffect
-        if (player.currentMediaItem?.localConfiguration?.uri?.toString() != current.episode.url) {
-            val item = MediaItem.Builder()
-                .setUri(current.episode.url)
+        endedEpisodeUrl = null
+        val episodeIndex = current.line.episodes.indexOfFirst { it.url == current.episode.url }
+        val playlistEpisodes = if (episodeIndex >= 0) current.line.episodes else listOf(current.episode)
+        val targetIndex = episodeIndex.coerceAtLeast(0)
+        val playlistItems = playlistEpisodes.map { episode ->
+            MediaItem.Builder()
+                .setMediaId(episode.url)
+                .setUri(episode.url)
                 .setMimeType(MimeTypes.APPLICATION_M3U8)
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(state.detail?.video?.title)
-                        .setSubtitle(current.episode.name)
+                        .setSubtitle(episode.name)
                         .build(),
                 )
                 .build()
-            player.setMediaItem(item, current.startPosition)
-            player.prepare()
-            player.playWhenReady = true
         }
+        val currentPlaylist = (0 until player.mediaItemCount).map { index ->
+            player.getMediaItemAt(index).localConfiguration?.uri?.toString().orEmpty()
+        }
+        val targetPlaylist = playlistEpisodes.map { it.url }
+        when {
+            currentPlaylist != targetPlaylist -> {
+                player.setMediaItems(playlistItems, targetIndex, current.startPosition)
+                player.prepare()
+            }
+            player.currentMediaItemIndex != targetIndex -> {
+                player.seekTo(targetIndex, current.startPosition)
+            }
+            player.playbackState == Player.STATE_IDLE -> player.prepare()
+        }
+        player.playWhenReady = true
     }
     val playerPresentation = rememberUpdatedState(
         PlayerPresentation(
@@ -1366,9 +1502,9 @@ private fun DetailRoute(
             onCacheEpisode = ::cacheCurrentEpisode,
             onCacheLine = ::cacheCurrentLine,
             onPlaybackEnded = ::playNextEpisode,
+            onEpisodeChanged = ::syncEpisodeFromPlayer,
             onProgress = { position, duration ->
                 activePlaying?.let { current ->
-                    playing = current.copy(startPosition = position)
                     viewModel.recordPlayback(
                         current.line.id,
                         current.episode.name,
@@ -1407,6 +1543,7 @@ private fun DetailRoute(
                 onCacheEpisode = presentation.onCacheEpisode,
                 onCacheLine = presentation.onCacheLine,
                 onPlaybackEnded = presentation.onPlaybackEnded,
+                onEpisodeChanged = presentation.onEpisodeChanged,
                 onProgress = presentation.onProgress,
             )
         }
@@ -1682,6 +1819,7 @@ private fun NativePlayer(
     onCacheEpisode: () -> Unit,
     onCacheLine: () -> Unit,
     onPlaybackEnded: () -> Unit,
+    onEpisodeChanged: (String) -> Unit,
     onProgress: (Long, Long) -> Unit,
 ) {
     val context = LocalContext.current
@@ -1702,6 +1840,7 @@ private fun NativePlayer(
     var playerView by remember(player) { mutableStateOf<GesturePlayerView?>(null) }
     val currentOnProgress by rememberUpdatedState(onProgress)
     val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
+    val currentOnEpisodeChanged by rememberUpdatedState(onEpisodeChanged)
     fun saveProgress() {
         val duration = player.duration.takeUnless { it == C.TIME_UNSET } ?: 0
         currentOnProgress(player.currentPosition, duration)
@@ -1728,6 +1867,11 @@ private fun NativePlayer(
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val url = mediaItem?.localConfiguration?.uri?.toString() ?: return
+                currentOnEpisodeChanged(url)
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_READY) playbackError = null
@@ -1745,9 +1889,32 @@ private fun NativePlayer(
 
     LaunchedEffect(player) {
         configureAutoPip(true)
+        var progressTicks = 0
+        var nearEndBufferTicks = 0
         while (true) {
-            delay(10_000)
-            saveProgress()
+            delay(500)
+            val duration = player.duration.takeUnless { it == C.TIME_UNSET || it <= 0 }
+            if (duration != null && player.hasNextMediaItem()) {
+                val remaining = (duration - player.currentPosition).coerceAtLeast(0)
+                nearEndBufferTicks = if (
+                    player.playbackState == Player.STATE_BUFFERING && remaining <= 20_000
+                ) {
+                    nearEndBufferTicks + 1
+                } else {
+                    0
+                }
+                if (remaining <= 1_200 || nearEndBufferTicks >= 12) {
+                    nearEndBufferTicks = 0
+                    currentOnPlaybackEnded()
+                }
+            } else {
+                nearEndBufferTicks = 0
+            }
+            progressTicks++
+            if (progressTicks >= 20) {
+                progressTicks = 0
+                saveProgress()
+            }
         }
     }
     DisposableEffect(player) {
@@ -2773,6 +2940,7 @@ private fun IKanTheme(
     mode: ThemeMode,
     useDynamicColor: Boolean,
     customThemeColor: Int,
+    wallpaperSeedColor: Int?,
     paletteRevision: Int,
     content: @Composable () -> Unit,
 ) {
@@ -2780,13 +2948,19 @@ private fun IKanTheme(
     val view = LocalView.current
     val systemDark = (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     val dark = mode == ThemeMode.DARK || (mode == ThemeMode.SYSTEM && systemDark)
-    val baseColors = if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        // Reading the revision is intentional: it invalidates this calculation after returning
-        // from the wallpaper/theme picker, including on systems that keep the Activity alive.
-        paletteRevision
-        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else {
-        dynamicColorScheme(
+    val baseColors = when {
+        useDynamicColor && wallpaperSeedColor != null -> dynamicColorScheme(
+            seedColor = Color(wallpaperSeedColor),
+            isDark = dark,
+            isAmoled = false,
+        )
+        useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            // Reading the revision is intentional: it invalidates this calculation after returning
+            // from the wallpaper/theme picker, including on systems that keep the Activity alive.
+            paletteRevision
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        else -> dynamicColorScheme(
             seedColor = Color(customThemeColor),
             isDark = dark,
             isAmoled = false,

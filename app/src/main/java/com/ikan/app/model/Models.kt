@@ -17,6 +17,7 @@ data class CatalogPage(
     val filters: List<CatalogFilter> = emptyList(),
     val videos: List<Video> = emptyList(),
     val sections: List<VideoSection> = emptyList(),
+    val previousPath: String? = null,
     val nextPath: String? = null,
 )
 
