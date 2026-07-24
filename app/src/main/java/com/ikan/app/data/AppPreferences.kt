@@ -1,7 +1,9 @@
 package com.ikan.app.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ikan.app.model.ThemeMode
@@ -13,11 +15,19 @@ private val Context.dataStore by preferencesDataStore("settings")
 
 class AppPreferences(private val context: Context) {
     private val themeKey = stringPreferencesKey("theme")
+    private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
+    private val customThemeColorKey = intPreferencesKey("custom_theme_color")
     private val searchHistoryKey = stringPreferencesKey("search_history")
 
     val theme: Flow<ThemeMode> = context.dataStore.data.map { preferences ->
         runCatching { ThemeMode.valueOf(preferences[themeKey] ?: ThemeMode.SYSTEM.name) }
             .getOrDefault(ThemeMode.SYSTEM)
+    }
+    val dynamicColor: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[dynamicColorKey] ?: true
+    }
+    val customThemeColor: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[customThemeColorKey] ?: DEFAULT_THEME_COLOR
     }
 
     val searchHistory: Flow<List<String>> = context.dataStore.data.map { preferences ->
@@ -29,6 +39,14 @@ class AppPreferences(private val context: Context) {
 
     suspend fun setTheme(mode: ThemeMode) {
         context.dataStore.edit { it[themeKey] = mode.name }
+    }
+
+    suspend fun setDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { it[dynamicColorKey] = enabled }
+    }
+
+    suspend fun setCustomThemeColor(color: Int) {
+        context.dataStore.edit { it[customThemeColorKey] = color }
     }
 
     suspend fun addSearch(query: String) {
@@ -47,5 +65,9 @@ class AppPreferences(private val context: Context) {
 
     suspend fun clearSearchHistory() {
         context.dataStore.edit { it.remove(searchHistoryKey) }
+    }
+
+    private companion object {
+        const val DEFAULT_THEME_COLOR = 0xFF216DFF.toInt()
     }
 }

@@ -37,9 +37,16 @@ data class DetailUiState(
 )
 
 class MainViewModel(private val app: IKanApplication) : ViewModel() {
+    private sealed interface CatalogRequest {
+        data class Category(val value: HomeCategory) : CatalogRequest
+        data class Path(val path: String, val title: String) : CatalogRequest
+        data class Search(val query: String) : CatalogRequest
+    }
+
     private val repository: IKanRepository = app.repository
     private var catalogJob: Job? = null
     private var detailJob: Job? = null
+    private var catalogRequest: CatalogRequest = CatalogRequest.Category(HomeCategory.RECOMMEND)
 
     private val _category = MutableStateFlow(HomeCategory.RECOMMEND)
     val category = _category.asStateFlow()
@@ -59,6 +66,12 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
     val theme = app.preferences.theme.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeMode.SYSTEM,
     )
+    val dynamicColor = app.preferences.dynamicColor.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), true,
+    )
+    val customThemeColor = app.preferences.customThemeColor.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), 0xFF216DFF.toInt(),
+    )
     val searchHistory = app.preferences.searchHistory.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList(),
     )
@@ -67,6 +80,7 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
     init { loadCategory(HomeCategory.RECOMMEND, useStartupPrefetch = true) }
 
     fun loadCategory(value: HomeCategory, useStartupPrefetch: Boolean = false) {
+        catalogRequest = CatalogRequest.Category(value)
         _category.value = value
         _searching.value = false
         catalogJob?.cancel()
@@ -87,6 +101,7 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
     }
 
     fun loadPath(path: String, title: String) {
+        catalogRequest = CatalogRequest.Path(path, title)
         catalogJob?.cancel()
         catalogJob = viewModelScope.launch {
             _catalog.value = CatalogUiState(loading = true, page = _catalog.value.page)
@@ -97,6 +112,7 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
 
     fun search(query: String) {
         if (query.isBlank()) return
+        catalogRequest = CatalogRequest.Search(query)
         _searching.value = true
         catalogJob?.cancel()
         catalogJob = viewModelScope.launch {
@@ -104,6 +120,14 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
             _catalog.value = CatalogUiState(loading = true)
             _catalog.value = runCatching { repository.search(query) }
                 .fold({ CatalogUiState(page = it, loading = false) }, { CatalogUiState(false, error = readable(it)) })
+        }
+    }
+
+    fun refreshCatalog() {
+        when (val request = catalogRequest) {
+            is CatalogRequest.Category -> loadCategory(request.value)
+            is CatalogRequest.Path -> loadPath(request.path, request.title)
+            is CatalogRequest.Search -> search(request.query)
         }
     }
 
@@ -162,6 +186,10 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
     fun clearHistory() = viewModelScope.launch { repository.clearHistory() }
     fun clearSearchHistory() = viewModelScope.launch { app.preferences.clearSearchHistory() }
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { app.preferences.setTheme(mode) }
+    fun setDynamicColor(enabled: Boolean) =
+        viewModelScope.launch { app.preferences.setDynamicColor(enabled) }
+    fun setCustomThemeColor(color: Int) =
+        viewModelScope.launch { app.preferences.setCustomThemeColor(color) }
 
     private fun readable(error: Throwable): String {
         val causes = generateSequence(error as Throwable?) { it.cause }.toList()

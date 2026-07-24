@@ -21,6 +21,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
@@ -32,6 +33,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -71,11 +73,11 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.BrokenImage
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DarkMode
@@ -92,6 +94,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
@@ -119,26 +122,29 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberSwipeToDismissBoxState
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.movableContentWithReceiverOf
 import androidx.compose.runtime.remember
@@ -151,6 +157,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
@@ -211,13 +219,16 @@ import com.ikan.app.model.PlayEpisode
 import com.ikan.app.model.PlayLine
 import com.ikan.app.model.ThemeMode
 import com.ikan.app.model.Video
+import com.materialkolor.dynamicColorScheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     private val pipState = mutableStateOf(false)
     private val pipReturningState = mutableStateOf(false)
+    private val paletteRevision = mutableStateOf(0)
     private var pipSourceRect: Rect? = null
     private var autoPipEnabled = false
     private var pipReturnJob: Job? = null
@@ -231,7 +242,9 @@ class MainActivity : ComponentActivity() {
             val app = application as IKanApplication
             val viewModel: MainViewModel = viewModel(factory = MainViewModel.factory(app))
             val theme by viewModel.theme.collectAsStateWithLifecycle()
-            IKanTheme(theme) {
+            val dynamicColor by viewModel.dynamicColor.collectAsStateWithLifecycle()
+            val customThemeColor by viewModel.customThemeColor.collectAsStateWithLifecycle()
+            IKanTheme(theme, dynamicColor, customThemeColor, paletteRevision.value) {
                 IKanApp(
                     viewModel = viewModel,
                     isPip = pipState.value,
@@ -261,6 +274,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Some vendor systems update Monet overlays without dispatching a configuration that
+        // Compose observes. Re-read the system palette whenever the app returns to foreground.
+        paletteRevision.value++
         val pendingUpdate = UpdateInstaller.pendingOrCompleted(this)
         if (pendingUpdate >= 0) {
             window.decorView.post {
@@ -329,6 +345,7 @@ private class TabSwipeState {
     var pagerOriginInRoot = Offset.Zero
     val exclusions = mutableMapOf<Any, ComposeRect>()
     var animationJob: Job? = null
+    var navigationTapJob: Job? = null
 }
 
 private val LocalTabSwipeState =
@@ -389,6 +406,8 @@ private fun IKanApp(
     val homeSectionPositions = remember { mutableMapOf<String, Pair<Int, Int>>() }
     val favoritesGridState = rememberLazyGridState()
     val historyGridState = rememberLazyGridState()
+    val cacheListState = rememberLazyListState()
+    val settingsListState = rememberLazyListState()
     val transitionChromeAlpha by animateFloatAsState(
         targetValue = if (detailId == null) 1f else 0f,
         animationSpec = tween(320),
@@ -407,6 +426,57 @@ private fun IKanApp(
         detailVideo = Video(item.videoId, item.title, item.poster)
         detailId = item.videoId
         viewModel.loadDetail(item.videoId)
+    }
+
+    fun isTabAtTop(tab: MainTab): Boolean = when (tab) {
+        MainTab.HOME -> {
+            if (viewModel.catalog.value.page?.sections?.isNotEmpty() == true) {
+                homeListState.firstVisibleItemIndex == 0 &&
+                    homeListState.firstVisibleItemScrollOffset == 0
+            } else {
+                homeGridState.firstVisibleItemIndex == 0 &&
+                    homeGridState.firstVisibleItemScrollOffset == 0
+            }
+        }
+        MainTab.FAVORITES ->
+            favoritesGridState.firstVisibleItemIndex == 0 &&
+                favoritesGridState.firstVisibleItemScrollOffset == 0
+        MainTab.HISTORY ->
+            historyGridState.firstVisibleItemIndex == 0 &&
+                historyGridState.firstVisibleItemScrollOffset == 0
+        MainTab.CACHE ->
+            cacheListState.firstVisibleItemIndex == 0 &&
+                cacheListState.firstVisibleItemScrollOffset == 0
+        MainTab.SETTINGS ->
+            settingsListState.firstVisibleItemIndex == 0 &&
+                settingsListState.firstVisibleItemScrollOffset == 0
+    }
+
+    fun refreshTab(tab: MainTab) {
+        if (tab == MainTab.HOME) viewModel.refreshCatalog()
+        // Library and cache tabs are backed by live Room/Media3 flows and are already current.
+    }
+
+    fun handleTabReselection(tab: MainTab, forceRefresh: Boolean) {
+        appScope.launch {
+            if (forceRefresh || isTabAtTop(tab)) {
+                refreshTab(tab)
+            } else {
+                when (tab) {
+                    MainTab.HOME -> {
+                        if (viewModel.catalog.value.page?.sections?.isNotEmpty() == true) {
+                            homeListState.animateScrollToItem(0)
+                        } else {
+                            homeGridState.animateScrollToItem(0)
+                        }
+                    }
+                    MainTab.FAVORITES -> favoritesGridState.animateScrollToItem(0)
+                    MainTab.HISTORY -> historyGridState.animateScrollToItem(0)
+                    MainTab.CACHE -> cacheListState.animateScrollToItem(0)
+                    MainTab.SETTINGS -> settingsListState.animateScrollToItem(0)
+                }
+            }
+        }
     }
 
     SharedTransitionLayout {
@@ -458,6 +528,7 @@ private fun IKanApp(
                     isPipReturning = isPipReturning,
                     enterPip = enterPip,
                     configureAutoPip = configureAutoPip,
+                    deferDetailContent = detailId != null && isTransitionActive,
                     onBack = {
                         detailId = null
                         // Keep the outgoing detail tree alive until its poster/title have reached
@@ -476,6 +547,8 @@ private fun IKanApp(
                 MainTabs(
                     selected = tab,
                     onSelected = { tab = it },
+                    onReselected = { handleTabReselection(it, false) },
+                    onDoubleClicked = { handleTabReselection(it, true) },
                     navigationModifier = transitionChromeModifier,
                 ) { visibleTab, padding ->
                     when (visibleTab) {
@@ -536,14 +609,20 @@ private fun IKanApp(
                                 onDelete = viewModel::removeDownload,
                                 onSetPaused = viewModel::setDownloadPaused,
                                 onClear = viewModel::clearDownloads,
+                                listState = cacheListState,
                             )
                         }
                         MainTab.SETTINGS -> SettingsScreen(
                             theme = viewModel.theme.collectAsStateWithLifecycle().value,
+                            dynamicColor = viewModel.dynamicColor.collectAsStateWithLifecycle().value,
+                            customThemeColor = viewModel.customThemeColor.collectAsStateWithLifecycle().value,
+                            listState = settingsListState,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(bottom = padding.calculateBottomPadding()),
                             onTheme = viewModel::setTheme,
+                            onDynamicColor = viewModel::setDynamicColor,
+                            onCustomThemeColor = viewModel::setCustomThemeColor,
                         )
                     }
                 }
@@ -556,6 +635,8 @@ private fun IKanApp(
 private fun MainTabs(
     selected: MainTab,
     onSelected: (MainTab) -> Unit,
+    onReselected: (MainTab) -> Unit,
+    onDoubleClicked: (MainTab) -> Unit,
     navigationModifier: Modifier = Modifier,
     content: @Composable (MainTab, androidx.compose.foundation.layout.PaddingValues) -> Unit,
 ) {
@@ -574,6 +655,27 @@ private fun MainTabs(
     }
 
     fun selectTab(tab: MainTab) {
+        val isCurrentSettledTab =
+            pagerState.currentPage == tab.ordinal &&
+                pagerState.currentPageOffsetFraction == 0f
+        if (isCurrentSettledTab) {
+            val pendingTap = swipeState.navigationTapJob
+            if (pendingTap?.isActive == true) {
+                pendingTap.cancel()
+                swipeState.navigationTapJob = null
+                onDoubleClicked(tab)
+            } else {
+                swipeState.navigationTapJob = scope.launch {
+                    delay(android.view.ViewConfiguration.getDoubleTapTimeout().toLong())
+                    swipeState.navigationTapJob = null
+                    onReselected(tab)
+                }
+            }
+            return
+        }
+
+        swipeState.navigationTapJob?.cancel()
+        swipeState.navigationTapJob = null
         onSelected(tab)
         if (pagerState.currentPage != tab.ordinal || pagerState.currentPageOffsetFraction != 0f) {
             swipeState.animationJob?.cancel()
@@ -1065,6 +1167,7 @@ private fun DetailRoute(
     isPipReturning: Boolean,
     enterPip: () -> Unit,
     configureAutoPip: (Boolean) -> Unit,
+    deferDetailContent: Boolean,
     onBack: () -> Unit,
 ) {
     val state by viewModel.detail.collectAsStateWithLifecycle()
@@ -1342,7 +1445,7 @@ private fun DetailRoute(
         },
     ) { padding ->
         when {
-            state.loading -> {
+            state.loading || deferDetailContent -> {
                 val loadingInfo: @Composable (Modifier) -> Unit = { modifier ->
                     if (sourceVideo != null) {
                         Row(
@@ -2053,6 +2156,7 @@ private fun CacheScreen(
     downloads: List<CachedEpisode>,
     modifier: Modifier,
     navigationPadding: androidx.compose.foundation.layout.PaddingValues,
+    listState: LazyListState,
     onPlay: (CachedEpisode) -> Unit,
     onDelete: (String) -> Unit,
     onSetPaused: (String, Boolean) -> Unit,
@@ -2095,6 +2199,7 @@ private fun CacheScreen(
                         .fillMaxSize()
                         .padding(horizontal = 16.dp)
                         .align(Alignment.TopCenter),
+                    state = listState,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         bottom = navigationPadding.calculateBottomPadding() + 16.dp,
                     ),
@@ -2265,12 +2370,21 @@ private fun cacheStatus(item: CachedEpisode): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (ThemeMode) -> Unit) {
+private fun SettingsScreen(
+    theme: ThemeMode,
+    dynamicColor: Boolean,
+    customThemeColor: Int,
+    listState: LazyListState,
+    modifier: Modifier,
+    onTheme: (ThemeMode) -> Unit,
+    onDynamicColor: (Boolean) -> Unit,
+    onCustomThemeColor: (Int) -> Unit,
+) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val updater = remember { AppUpdater(context.applicationContext) }
-    var themeDialog by remember { mutableStateOf(false) }
+    var colorDialog by remember { mutableStateOf(false) }
     var checkingUpdate by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
 
@@ -2290,15 +2404,44 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
                 .widthIn(max = 720.dp)
                 .fillMaxSize()
                 .align(Alignment.TopCenter),
+            state = listState,
         ) {
             item { SettingsHeader("外观") }
             item {
-                SettingsRow(
-                    icon = when (theme) { ThemeMode.DARK -> Icons.Default.DarkMode; ThemeMode.LIGHT -> Icons.Default.LightMode; else -> Icons.Default.Settings },
-                    title = "APP 风格",
-                    subtitle = when (theme) { ThemeMode.DARK -> "暗色"; ThemeMode.LIGHT -> "亮色"; else -> "跟随系统" },
-                    onClick = { themeDialog = true },
+                ThemeModeSetting(theme = theme, onTheme = onTheme)
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text("莫奈取色") },
+                    supportingContent = { Text("根据系统壁纸自动生成主题配色") },
+                    leadingContent = { Icon(Icons.Default.Palette, null) },
+                    trailingContent = {
+                        Switch(
+                            checked = dynamicColor,
+                            onCheckedChange = onDynamicColor,
+                        )
+                    },
+                    modifier = Modifier.clickable { onDynamicColor(!dynamicColor) },
                 )
+            }
+            item {
+                AnimatedVisibility(visible = !dynamicColor) {
+                    ListItem(
+                        headlineContent = { Text("主题色") },
+                        supportingContent = { Text("关闭莫奈取色时使用") },
+                        leadingContent = {
+                            Box(
+                                Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(customThemeColor))
+                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                            )
+                        },
+                        trailingContent = { Text("›", style = MaterialTheme.typography.titleLarge) },
+                        modifier = Modifier.clickable { colorDialog = true },
+                    )
+                }
             }
             item { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
             item { SettingsHeader("更新与关于") }
@@ -2321,13 +2464,14 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
                 ) {
                     checkingUpdate = true
                     scope.launch {
-                        runCatching { updater.check() }
+                        val result = runCatching { updater.check() }
+                        checkingUpdate = false
+                        result
                             .onSuccess { info ->
                                 if (updater.isNewer(info.version)) availableUpdate = info
                                 else snackbar.showSnackbar("已是最新版本 ${BuildConfig.VERSION_NAME}")
                             }
                             .onFailure { snackbar.showSnackbar(it.message ?: "检查更新失败") }
-                        checkingUpdate = false
                     }
                 }
             }
@@ -2342,28 +2486,19 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
                 }
             }
             item {
-                SettingsRow(Icons.Default.Info, "关于爱看", "版本 ${BuildConfig.VERSION_NAME} · 原生高性能播放器", clickable = false) { }
+                SettingsRow(Icons.Default.Info, "版本", BuildConfig.VERSION_NAME, clickable = false) { }
             }
         }
         }
     }
 
-    if (themeDialog) AlertDialog(
-        onDismissRequest = { themeDialog = false },
-        title = { Text("APP 风格") },
-        text = {
-            Column {
-                ThemeMode.entries.forEach { mode ->
-                    val label = when (mode) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "亮色"; ThemeMode.DARK -> "暗色" }
-                    ListItem(
-                        headlineContent = { Text(label) },
-                        leadingContent = { if (theme == mode) Icon(Icons.Default.Check, null) },
-                        modifier = Modifier.clickable { onTheme(mode); themeDialog = false },
-                    )
-                }
-            }
+    if (colorDialog) ThemeColorDialog(
+        initialColor = Color(customThemeColor),
+        onDismiss = { colorDialog = false },
+        onConfirm = {
+            onCustomThemeColor(it.toArgb())
+            colorDialog = false
         },
-        confirmButton = {},
     )
 
     availableUpdate?.let { info ->
@@ -2406,6 +2541,156 @@ private fun SettingsScreen(theme: ThemeMode, modifier: Modifier, onTheme: (Theme
                     }
                 }) { Text("下载并安装") }
             },
+        )
+    }
+}
+
+@Composable
+private fun ThemeModeSetting(theme: ThemeMode, onTheme: (ThemeMode) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        ListItem(
+            headlineContent = { Text("APP 风格") },
+            supportingContent = { Text("设置应用的明暗外观") },
+            leadingContent = {
+                Icon(
+                    when (theme) {
+                        ThemeMode.DARK -> Icons.Default.DarkMode
+                        ThemeMode.LIGHT -> Icons.Default.LightMode
+                        ThemeMode.SYSTEM -> Icons.Default.Settings
+                    },
+                    null,
+                )
+            },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 56.dp, end = 16.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(
+                ThemeMode.SYSTEM to "自动",
+                ThemeMode.LIGHT to "亮色",
+                ThemeMode.DARK to "暗色",
+            ).forEach { (mode, label) ->
+                val selected = theme == mode
+                OutlinedButton(
+                    onClick = { onTheme(mode) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (selected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            Color.Transparent
+                        },
+                        contentColor = if (selected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    ),
+                ) {
+                    Text(label)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeColorDialog(
+    initialColor: Color,
+    onDismiss: () -> Unit,
+    onConfirm: (Color) -> Unit,
+) {
+    var red by remember(initialColor) { mutableFloatStateOf(initialColor.red) }
+    var green by remember(initialColor) { mutableFloatStateOf(initialColor.green) }
+    var blue by remember(initialColor) { mutableFloatStateOf(initialColor.blue) }
+    val color = Color(red, green, blue)
+    val presets = listOf(
+        Color(0xFF216DFF),
+        Color(0xFF6750A4),
+        Color(0xFF008577),
+        Color(0xFF3F7D20),
+        Color(0xFFC2410C),
+        Color(0xFFB3261E),
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择主题色") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(72.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(color)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
+                )
+                ThemeColorSlider("红", red, Color.Red) { red = it }
+                ThemeColorSlider("绿", green, Color.Green) { green = it }
+                ThemeColorSlider("蓝", blue, Color.Blue) { blue = it }
+                Text(
+                    "#${color.toArgb().toUInt().toString(16).takeLast(6).uppercase()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text("预设颜色", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    presets.forEach { preset ->
+                        Box(
+                            Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(preset)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                .clickable {
+                                    red = preset.red
+                                    green = preset.green
+                                    blue = preset.blue
+                                },
+                        )
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(color) }) { Text("确定") }
+        },
+    )
+}
+
+@Composable
+private fun ThemeColorSlider(
+    label: String,
+    value: Float,
+    trackColor: Color,
+    onValueChange: (Float) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.width(24.dp))
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(trackColor),
+        )
+        Text(
+            "${(value * 255).roundToInt()}",
+            modifier = Modifier.width(40.dp),
+            textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }
@@ -2457,14 +2742,39 @@ private fun ErrorState(error: String, retry: () -> Unit, modifier: Modifier = Mo
 }
 
 @Composable
-private fun IKanTheme(mode: ThemeMode, content: @Composable () -> Unit) {
+private fun IKanTheme(
+    mode: ThemeMode,
+    useDynamicColor: Boolean,
+    customThemeColor: Int,
+    paletteRevision: Int,
+    content: @Composable () -> Unit,
+) {
     val context = LocalContext.current
     val view = LocalView.current
     val systemDark = (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     val dark = mode == ThemeMode.DARK || (mode == ThemeMode.SYSTEM && systemDark)
-    val colors: ColorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    val baseColors = if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Reading the revision is intentional: it invalidates this calculation after returning
+        // from the wallpaper/theme picker, including on systems that keep the Activity alive.
+        paletteRevision
         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else if (dark) darkColorScheme() else lightColorScheme()
+    } else {
+        dynamicColorScheme(
+            seedColor = Color(customThemeColor),
+            isDark = dark,
+            isAmoled = false,
+        )
+    }
+    val colors: ColorScheme = if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Navigation and filter chips use secondaryContainer by default. Map those prominent
+        // selected states to the wallpaper's primary family so Monet is visible at a glance.
+        baseColors.copy(
+            secondaryContainer = baseColors.primaryContainer,
+            onSecondaryContainer = baseColors.onPrimaryContainer,
+        )
+    } else {
+        baseColors
+    }
     SideEffect {
         val activity = context as? ComponentActivity ?: return@SideEffect
         WindowCompat.getInsetsController(activity.window, view).apply {
