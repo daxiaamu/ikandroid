@@ -40,7 +40,6 @@ class GesturePlayerView @JvmOverloads constructor(
     private var startPosition = 0L
     private var targetPosition = 0L
     private var nativeProgressGesture = false
-    private val clearFeedback = Runnable { onGestureFeedback?.invoke(null) }
     private var onBackAction: (() -> Unit)? = null
     private var onCastAction: (() -> Unit)? = null
     private var onSettingsAction: (() -> Unit)? = null
@@ -96,7 +95,6 @@ class GesturePlayerView @JvmOverloads constructor(
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                removeCallbacks(clearFeedback)
                 mode = GestureMode.NONE
                 downX = event.x
                 downY = event.y
@@ -146,8 +144,6 @@ class GesturePlayerView @JvmOverloads constructor(
                 mode = GestureMode.NONE
                 parent?.requestDisallowInterceptTouchEvent(false)
                 if (wasGesture) {
-                    removeCallbacks(clearFeedback)
-                    postDelayed(clearFeedback, 1_200L)
                     return true
                 }
                 return super.dispatchTouchEvent(event)

@@ -1695,6 +1695,7 @@ private fun NativePlayer(
     var showPlaybackSettings by remember { mutableStateOf(false) }
     var showCacheOptions by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
+    var gestureFeedbackDismissJob by remember { mutableStateOf<Job?>(null) }
     var controlsVisible by remember(player) { mutableStateOf(true) }
     var buffering by remember(player) { mutableStateOf(player.playbackState == Player.STATE_BUFFERING) }
     var playbackError by remember(player) { mutableStateOf<PlaybackException?>(player.playerError) }
@@ -1776,7 +1777,18 @@ private fun NativePlayer(
                     (LayoutInflater.from(ctx).inflate(R.layout.player_view, null, false) as GesturePlayerView).apply {
                         playerView = this
                         this.player = player
-                        onGestureFeedback = { gestureFeedback = it }
+                        onGestureFeedback = {
+                            gestureFeedback = it
+                            gestureFeedbackDismissJob?.cancel()
+                            gestureFeedbackDismissJob = if (it == null) {
+                                null
+                            } else {
+                                scope.launch {
+                                    delay(1_200L)
+                                    gestureFeedback = null
+                                }
+                            }
+                        }
                         setControllerVisibilityListener(
                             PlayerView.ControllerVisibilityListener { visibility ->
                                 controlsVisible = visibility == View.VISIBLE
@@ -1842,6 +1854,8 @@ private fun NativePlayer(
                 },
                 onRelease = {
                     (it as? GesturePlayerView)?.onGestureFeedback = null
+                    gestureFeedbackDismissJob?.cancel()
+                    gestureFeedbackDismissJob = null
                     if (playerView === it) playerView = null
                     it.player = null
                 },
@@ -1922,7 +1936,11 @@ private fun NativePlayer(
                         enabled = playing != null && cachedEpisode == null,
                     )
                     PlayerActionIcon(Icons.Default.PictureInPicture, "画中画")
-                    PlayerActionIcon(Icons.Default.Fullscreen, "横竖屏切换")
+                    PlayerActionIcon(
+                        Icons.Default.Fullscreen,
+                        "横竖屏切换",
+                        iconSize = 30.dp,
+                    )
                 }
             }
         }
@@ -2050,11 +2068,13 @@ private fun PlayerActionIcon(
     icon: ImageVector,
     description: String,
     enabled: Boolean = true,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp,
 ) {
     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
         Icon(
             icon,
             description,
+            modifier = Modifier.size(iconSize),
             tint = androidx.compose.ui.graphics.Color.White.copy(alpha = if (enabled) 1f else 0.45f),
         )
     }
