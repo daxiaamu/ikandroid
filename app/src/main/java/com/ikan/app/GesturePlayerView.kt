@@ -12,8 +12,11 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.C
 import androidx.media3.ui.PlayerView
 import kotlin.math.abs
@@ -27,6 +30,8 @@ class GesturePlayerView @JvmOverloads constructor(
     defStyleAttr: Int = 0,
 ) : PlayerView(context, attrs, defStyleAttr) {
     var onGestureFeedback: ((String?) -> Unit)? = null
+    var onControllerChromeProgress: ((Float) -> Unit)? = null
+    var onFullscreenChromeInsetChanged: ((Float) -> Unit)? = null
 
     private enum class GestureMode { NONE, BRIGHTNESS, VOLUME, SEEK }
 
@@ -42,47 +47,78 @@ class GesturePlayerView @JvmOverloads constructor(
     private var nativeProgressGesture = false
     private var onBackAction: (() -> Unit)? = null
     private var onCastAction: (() -> Unit)? = null
-    private var onSettingsAction: (() -> Unit)? = null
+    private var onSpeedAction: (() -> Unit)? = null
+    private var onAudioAction: (() -> Unit)? = null
     private var onCacheAction: (() -> Unit)? = null
     private var onPipAction: (() -> Unit)? = null
     private var onFullscreenAction: (() -> Unit)? = null
     private var actionTargetsVisible = false
     private var actionTargetsFullscreen = false
+    private var audioActionVisible = false
     private var pendingAction: (() -> Unit)? = null
+    private var pendingActionCancelled = false
+    private var pendingActionDownX = 0f
+    private var pendingActionDownY = 0f
     private val topBackHitTarget by lazy {
         actionHitTarget("返回") { onBackAction?.invoke() }
     }
     private val topActionsHitTarget by lazy {
         LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(actionHitTarget("DLNA 投屏") { onCastAction?.invoke() })
-            addView(actionHitTarget("速度与音轨") { onSettingsAction?.invoke() })
-        }
-    }
-    private val bottomActionsHitTarget by lazy {
-        LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
             addView(actionHitTarget("缓存") { onCacheAction?.invoke() })
-            addView(actionHitTarget("画中画") { onPipAction?.invoke() })
-            addView(actionHitTarget("横竖屏切换") { onFullscreenAction?.invoke() })
+            addView(actionHitTarget("DLNA 投屏") { onCastAction?.invoke() })
+            addView(actionHitTarget("音轨") { onAudioAction?.invoke() })
+            addView(actionHitTarget("播放速度") { onSpeedAction?.invoke() })
         }
     }
     private var actionTargetsAttached = false
+    private var lastControllerChromeProgress = -1f
+    private val controllerChromeObserver = ViewTreeObserver.OnPreDrawListener {
+        dispatchControllerChromeProgress()
+        true
+    }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            resolveAction(event.x, event.y)?.let {
-                pendingAction = it
+            clearPendingAction()
+            nativeProgressGesture = false
+            val progressHit = isNativeProgressTouch(event.x, event.y)
+            val action = resolveAction(event.x, event.y)
+            if (progressHit) {
+                nativeProgressGesture = true
+                mode = GestureMode.NONE
+                return super.dispatchTouchEvent(event)
+            }
+            action?.let {
+                pendingAction = action
+                pendingActionCancelled = false
+                pendingActionDownX = event.x
+                pendingActionDownY = event.y
                 return true
             }
         } else {
             pendingAction?.let { action ->
-                if (event.actionMasked == MotionEvent.ACTION_UP) action()
-                if (event.actionMasked == MotionEvent.ACTION_UP ||
-                    event.actionMasked == MotionEvent.ACTION_CANCEL
-                ) {
-                    pendingAction = null
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> {
+                        if (maxOf(
+                                abs(event.x - pendingActionDownX),
+                                abs(event.y - pendingActionDownY),
+                            ) > touchSlop
+                        ) {
+                            pendingActionCancelled = true
+                        }
+                    }
+
+                    MotionEvent.ACTION_UP -> {
+                        if (!pendingActionCancelled &&
+                            resolveAction(event.x, event.y) === action
+                        ) {
+                            action()
+                        }
+                        clearPendingAction()
+                    }
+
+                    MotionEvent.ACTION_CANCEL -> clearPendingAction()
                 }
                 return true
             }
@@ -103,8 +139,6 @@ class GesturePlayerView @JvmOverloads constructor(
                 startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
                 startPosition = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
                 targetPosition = startPosition
-                nativeProgressGesture = isNativeProgressTouch(event.x, event.y)
-                if (nativeProgressGesture) return super.dispatchTouchEvent(event)
                 super.dispatchTouchEvent(event)
                 return true
             }
@@ -153,19 +187,37 @@ class GesturePlayerView @JvmOverloads constructor(
         return super.dispatchTouchEvent(event)
     }
 
+    override fun onDetachedFromWindow() {
+        clearPendingAction()
+        if (viewTreeObserver.isAlive) {
+            viewTreeObserver.removeOnPreDrawListener(controllerChromeObserver)
+        }
+        super.onDetachedFromWindow()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnPreDrawListener(controllerChromeObserver)
+        post(::dispatchControllerChromeProgress)
+    }
+
     fun configureActionHitTargets(
         visible: Boolean,
         fullscreen: Boolean,
         onBack: () -> Unit,
         onCast: () -> Unit,
-        onSettings: () -> Unit,
+        onSpeed: () -> Unit,
+        onAudio: () -> Unit,
+        showAudio: Boolean,
         onCache: () -> Unit,
         onPip: () -> Unit,
         onFullscreen: () -> Unit,
     ) {
         onBackAction = onBack
         onCastAction = onCast
-        onSettingsAction = onSettings
+        onSpeedAction = onSpeed
+        onAudioAction = onAudio
+        audioActionVisible = showAudio
         onCacheAction = onCache
         onPipAction = onPip
         onFullscreenAction = onFullscreen
@@ -173,27 +225,36 @@ class GesturePlayerView @JvmOverloads constructor(
         actionTargetsFullscreen = fullscreen
         if (!actionTargetsAttached) {
             actionTargetsAttached = true
-            val button = dp(48)
-            val bottomBar = dp(60)
             addView(
                 topBackHitTarget,
-                LayoutParams(button, button, Gravity.TOP or Gravity.START),
+                LayoutParams(dp(56), dp(56), Gravity.TOP or Gravity.START),
             )
             addView(
                 topActionsHitTarget,
-                LayoutParams(button * 2, button, Gravity.TOP or Gravity.END),
-            )
-            addView(
-                bottomActionsHitTarget,
-                LayoutParams(button * 3, bottomBar, Gravity.BOTTOM or Gravity.END),
+                LayoutParams(dp(48) * 3, dp(48), Gravity.TOP or Gravity.END),
             )
         }
+        topActionsHitTarget.getChildAt(2).visibility =
+            if (showAudio) View.VISIBLE else View.GONE
+        updateTopActionLayout()
+        post(::updateTopActionLayout)
         topBackHitTarget.visibility = if (visible && fullscreen) View.VISIBLE else View.GONE
         topActionsHitTarget.visibility = if (visible) View.VISIBLE else View.GONE
-        bottomActionsHitTarget.visibility = if (visible) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.player_pip)?.apply {
+            visibility = if (visible) View.VISIBLE else View.GONE
+            setOnClickListener { onPipAction?.invoke() }
+        }
+        findViewById<View>(androidx.media3.ui.R.id.exo_fullscreen)?.apply {
+            visibility = if (visible) View.VISIBLE else View.GONE
+        }
+        // Media3 reports setFullscreenButtonState through the same callback that it uses
+        // for user clicks. Detach the listener while synchronizing the icon state so a
+        // recomposition cannot be mistaken for another fullscreen request.
+        setFullscreenButtonClickListener(null)
+        setFullscreenButtonState(fullscreen)
+        setFullscreenButtonClickListener { onFullscreenAction?.invoke() }
         bringChildToFront(topBackHitTarget)
         bringChildToFront(topActionsHitTarget)
-        bringChildToFront(bottomActionsHitTarget)
     }
 
     private fun actionHitTarget(description: String, action: () -> Unit): View =
@@ -211,18 +272,95 @@ class GesturePlayerView @JvmOverloads constructor(
     private fun resolveAction(x: Float, y: Float): (() -> Unit)? {
         if (!actionTargetsVisible) return null
         val button = dp(48).toFloat()
-        val bottomBar = dp(60).toFloat()
-        if (y <= button) {
-            if (actionTargetsFullscreen && x <= button) return onBackAction
-            if (x >= width - button) return onSettingsAction
-            if (x >= width - button * 2) return onCastAction
-        }
-        if (y >= height - bottomBar) {
-            if (x >= width - button) return onFullscreenAction
-            if (x >= width - button * 2) return onPipAction
-            if (x >= width - button * 3) return onCacheAction
+        val backButton = dp(56).toFloat()
+        val (startInset, endInset) = topActionInsets()
+        val backHitStart = (startInset - dp(4)).coerceAtLeast(0f)
+        val topHeight = if (actionTargetsFullscreen) backButton else button
+        if (y <= topHeight) {
+            if (
+                actionTargetsFullscreen &&
+                x >= backHitStart &&
+                x <= backHitStart + backButton
+            ) {
+                return onBackAction
+            }
+            val right = width - endInset
+            if (x in (right - button)..right) return onSpeedAction
+            var slot = 1
+            if (audioActionVisible) {
+                if (x in (right - button * 2)..(right - button)) return onAudioAction
+                slot++
+            }
+            if (x in (right - button * (slot + 1))..(right - button * slot)) {
+                return onCastAction
+            }
+            slot++
+            if (x in (right - button * (slot + 1))..(right - button * slot)) {
+                return onCacheAction
+            }
         }
         return null
+    }
+
+    private fun dispatchControllerChromeProgress() {
+        val bottomBar = findViewById<View>(androidx.media3.ui.R.id.exo_bottom_bar)
+        val progress = when {
+            bottomBar == null || bottomBar.visibility != View.VISIBLE -> 0f
+            bottomBar.height <= 0 -> 1f
+            else -> (1f - bottomBar.translationY / bottomBar.height).coerceIn(0f, 1f)
+        }
+        if (abs(progress - lastControllerChromeProgress) < 0.005f) return
+        lastControllerChromeProgress = progress
+        onControllerChromeProgress?.invoke(progress)
+    }
+
+    private fun updateTopActionLayout() {
+        val (startInset, endInset) = topActionInsets()
+        (topBackHitTarget.layoutParams as? LayoutParams)?.let { params ->
+            params.width = dp(56)
+            params.height = dp(56)
+            params.gravity = Gravity.TOP or Gravity.START
+            params.marginStart = (startInset - dp(4)).coerceAtLeast(0f).roundToInt()
+            topBackHitTarget.layoutParams = params
+        }
+        (topActionsHitTarget.layoutParams as? LayoutParams)?.let { params ->
+            params.width = dp(48) * (if (audioActionVisible) 4 else 3)
+            params.height = dp(48)
+            params.gravity = Gravity.TOP or Gravity.END
+            params.marginEnd = endInset.roundToInt()
+            topActionsHitTarget.layoutParams = params
+        }
+        findViewById<View>(androidx.media3.ui.R.id.exo_bottom_bar)?.let { bottomBar ->
+            val symmetricInset = if (actionTargetsFullscreen) {
+                (startInset + dp(4)).roundToInt()
+            } else {
+                0
+            }
+            bottomBar.setPadding(
+                symmetricInset,
+                bottomBar.paddingTop,
+                symmetricInset,
+                bottomBar.paddingBottom,
+            )
+            if (actionTargetsFullscreen) {
+                // The bottom buttons use 40 dp cells while the top buttons use 48 dp cells.
+                // Sharing this exact content edge, minus their 4 dp half-width difference,
+                // keeps the visual centers aligned on devices with asymmetric gesture insets.
+                onFullscreenChromeInsetChanged?.invoke(symmetricInset - dp(4).toFloat())
+            }
+        }
+    }
+
+    private fun topActionInsets(): Pair<Float, Float> {
+        if (!actionTargetsFullscreen) return 0f to 0f
+        val spacing = dp(12).toFloat()
+        val insets = ViewCompat.getRootWindowInsets(this)?.getInsets(
+            WindowInsetsCompat.Type.displayCutout() or
+                WindowInsetsCompat.Type.systemGestures(),
+        )
+        val safeInset = maxOf(insets?.left ?: 0, insets?.right ?: 0).toFloat()
+        val symmetricInset = safeInset + spacing
+        return symmetricInset to symmetricInset
     }
 
     private fun adjustBrightness(dy: Float) {
@@ -269,6 +407,11 @@ class GesturePlayerView @JvmOverloads constructor(
             progressLocation[1] - playerLocation[1] + progress.height,
         )
         return rect.contains(x.roundToInt(), y.roundToInt())
+    }
+
+    private fun clearPendingAction() {
+        pendingAction = null
+        pendingActionCancelled = false
     }
 
     private fun currentBrightness(): Float {

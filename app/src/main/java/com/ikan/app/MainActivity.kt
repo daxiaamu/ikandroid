@@ -56,13 +56,17 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -93,10 +97,10 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Language
@@ -104,13 +108,13 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -168,6 +172,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -189,14 +194,19 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -207,6 +217,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.ui.PlayerView
@@ -255,6 +266,11 @@ class MainActivity : ComponentActivity() {
     private var pipExitAwaitingResume = false
     private var playbackPlayer: ExoPlayer? = null
     private var backgroundPlaybackEnabled = false
+    private val pipPlayerListener = object : Player.Listener {
+        override fun onEvents(player: Player, events: Player.Events) {
+            refreshPipActions()
+        }
+    }
     private val warmPlayback = Runnable { obtainPlaybackPlayer() }
     private val shortcutVideo = mutableStateOf<Video?>(null)
 
@@ -310,11 +326,26 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.action == ACTION_CLOSE_PIP) {
-            closePipPlayback()
-        } else {
-            handleRecentShortcut(intent)
+        when (intent.action) {
+            ACTION_CLOSE_PIP -> closePipPlayback()
+            ACTION_PIP_PREVIOUS -> playbackPlayer?.let { player ->
+                if (player.hasPreviousMediaItem()) {
+                    player.seekToPreviousMediaItem()
+                    player.play()
+                }
+            }
+            ACTION_PIP_TOGGLE -> playbackPlayer?.let { player ->
+                if (player.isPlaying) player.pause() else player.play()
+            }
+            ACTION_PIP_NEXT -> playbackPlayer?.let { player ->
+                if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                    player.play()
+                }
+            }
+            else -> handleRecentShortcut(intent)
         }
+        refreshPipActions()
     }
 
     private fun handleRecentShortcut(intent: Intent?) {
@@ -334,6 +365,7 @@ class MainActivity : ComponentActivity() {
     fun obtainPlaybackPlayer(): ExoPlayer = playbackPlayer ?: synchronized(this) {
         playbackPlayer ?: (application as IKanApplication).playbackEngine.obtainPlayer().also {
             playbackPlayer = it
+            it.addListener(pipPlayerListener)
         }
     }
 
@@ -387,6 +419,7 @@ class MainActivity : ComponentActivity() {
         if (::wallpaperManager.isInitialized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             wallpaperManager.removeOnColorsChangedListener(wallpaperColorsListener)
         }
+        playbackPlayer?.removeListener(pipPlayerListener)
         playbackPlayer = null
         (application as IKanApplication).playbackEngine.releasePlayerIfSessionInactive()
         super.onDestroy()
@@ -449,7 +482,13 @@ class MainActivity : ComponentActivity() {
         const val THEME_CACHE = "theme_cache"
         const val WALLPAPER_SEED = "wallpaper_seed"
         const val ACTION_CLOSE_PIP = "com.ikan.app.action.CLOSE_PIP"
+        const val ACTION_PIP_PREVIOUS = "com.ikan.app.action.PIP_PREVIOUS"
+        const val ACTION_PIP_TOGGLE = "com.ikan.app.action.PIP_TOGGLE"
+        const val ACTION_PIP_NEXT = "com.ikan.app.action.PIP_NEXT"
         const val PIP_CLOSE_REQUEST_CODE = 1203
+        const val PIP_PREVIOUS_REQUEST_CODE = 1204
+        const val PIP_TOGGLE_REQUEST_CODE = 1205
+        const val PIP_NEXT_REQUEST_CODE = 1206
     }
 
     override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
@@ -500,6 +539,36 @@ class MainActivity : ComponentActivity() {
     private fun buildPipParams(): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
         pipSourceRect?.let(builder::setSourceRectHint)
+        val player = playbackPlayer
+        builder.setActions(
+            listOf(
+                pipAction(
+                    icon = android.R.drawable.ic_media_previous,
+                    title = "上一集",
+                    action = ACTION_PIP_PREVIOUS,
+                    requestCode = PIP_PREVIOUS_REQUEST_CODE,
+                    enabled = player?.hasPreviousMediaItem() == true,
+                ),
+                pipAction(
+                    icon = if (player?.isPlaying == true) {
+                        android.R.drawable.ic_media_pause
+                    } else {
+                        android.R.drawable.ic_media_play
+                    },
+                    title = if (player?.isPlaying == true) "暂停" else "播放",
+                    action = ACTION_PIP_TOGGLE,
+                    requestCode = PIP_TOGGLE_REQUEST_CODE,
+                    enabled = player?.currentMediaItem != null,
+                ),
+                pipAction(
+                    icon = android.R.drawable.ic_media_next,
+                    title = "下一集",
+                    action = ACTION_PIP_NEXT,
+                    requestCode = PIP_NEXT_REQUEST_CODE,
+                    enabled = player?.hasNextMediaItem() == true,
+                ),
+            ),
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder
                 .setAutoEnterEnabled(autoPipEnabled)
@@ -525,6 +594,36 @@ class MainActivity : ComponentActivity() {
             )
         }
         return builder.build()
+    }
+
+    private fun pipAction(
+        icon: Int,
+        title: String,
+        action: String,
+        requestCode: Int,
+        enabled: Boolean,
+    ): RemoteAction {
+        val intent = Intent(this, MainActivity::class.java)
+            .setAction(action)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return RemoteAction(
+            Icon.createWithResource(this, icon),
+            title,
+            title,
+            PendingIntent.getActivity(
+                this,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ),
+        ).apply {
+            isEnabled = enabled
+        }
+    }
+
+    private fun refreshPipActions() {
+        if (isFinishing || isDestroyed) return
+        setPictureInPictureParams(buildPipParams())
     }
 }
 
@@ -2024,6 +2123,13 @@ private fun NativePlayer(
     onProgress: (Long, Long) -> Unit,
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val safeDrawingPadding = WindowInsets.safeDrawing.asPaddingValues()
+    val fallbackFullscreenHorizontalPadding = maxOf(
+        safeDrawingPadding.calculateLeftPadding(layoutDirection),
+        safeDrawingPadding.calculateRightPadding(layoutDirection),
+    ) + 12.dp
     val activity = context as MainActivity
     val scope = rememberCoroutineScope()
     val dlna = remember { DlnaController() }
@@ -2031,13 +2137,28 @@ private fun NativePlayer(
     var devices by remember { mutableStateOf<List<DlnaDevice>>(emptyList()) }
     var discovering by remember { mutableStateOf(false) }
     var castError by remember { mutableStateOf<String?>(null) }
-    var showPlaybackSettings by remember { mutableStateOf(false) }
+    var showSpeedSettings by remember { mutableStateOf(false) }
+    var showAudioSettings by remember { mutableStateOf(false) }
     var showCacheOptions by remember { mutableStateOf(false) }
     var gestureFeedback by remember { mutableStateOf<String?>(null) }
     var gestureFeedbackDismissJob by remember { mutableStateOf<Job?>(null) }
     var controlsVisible by remember(player) { mutableStateOf(true) }
+    var controllerChromeProgress by remember(player) { mutableFloatStateOf(1f) }
+    var fullscreenChromeInsetPx by remember(player) { mutableFloatStateOf(-1f) }
+    val fullscreenHorizontalPadding = if (fullscreenChromeInsetPx >= 0f) {
+        with(density) { fullscreenChromeInsetPx.toDp() }
+    } else {
+        fallbackFullscreenHorizontalPadding
+    }
     var buffering by remember(player) { mutableStateOf(player.playbackState == Player.STATE_BUFFERING) }
     var playbackError by remember(player) { mutableStateOf<PlaybackException?>(player.playerError) }
+    var audioTrackCount by remember(player) {
+        mutableStateOf(
+            player.currentTracks.groups
+                .filter { it.type == C.TRACK_TYPE_AUDIO }
+                .sumOf { group -> (0 until group.length).count(group::isTrackSupported) },
+        )
+    }
     var playerView by remember(player) { mutableStateOf<GesturePlayerView?>(null) }
     val currentOnProgress by rememberUpdatedState(onProgress)
     val currentOnPlaybackEnded by rememberUpdatedState(onPlaybackEnded)
@@ -2082,6 +2203,12 @@ private fun NativePlayer(
             override fun onPlayerError(error: PlaybackException) {
                 playbackError = error
                 buffering = false
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                audioTrackCount = tracks.groups
+                    .filter { it.type == C.TRACK_TYPE_AUDIO }
+                    .sumOf { group -> (0 until group.length).count(group::isTrackSupported) }
             }
         }
         player.addListener(listener)
@@ -2157,14 +2284,14 @@ private fun NativePlayer(
                                 }
                             }
                         }
+                        onControllerChromeProgress = { controllerChromeProgress = it }
+                        onFullscreenChromeInsetChanged = { fullscreenChromeInsetPx = it }
                         setControllerVisibilityListener(
                             PlayerView.ControllerVisibilityListener { visibility ->
                                 controlsVisible = visibility == View.VISIBLE
                             },
                         )
                         useController = !isPip && !isPipReturning
-                        setShowPreviousButton(false)
-                        setShowNextButton(false)
                         setControllerShowTimeoutMs(3_000)
                         findViewById<View>(androidx.media3.ui.R.id.exo_center_controls)?.apply {
                             val controlsScale = if (fullscreen) 1f else 0.72f
@@ -2183,7 +2310,9 @@ private fun NativePlayer(
                             fullscreen = fullscreen,
                             onBack = onBack,
                             onCast = ::openCastPicker,
-                            onSettings = { showPlaybackSettings = true },
+                            onSpeed = { showSpeedSettings = true },
+                            onAudio = { showAudioSettings = true },
+                            showAudio = audioTrackCount > 1,
                             onCache = ::requestCache,
                             onPip = enterPip,
                             onFullscreen = onFullscreenToggle,
@@ -2194,8 +2323,6 @@ private fun NativePlayer(
                 update = {
                     it.player = player
                     it.useController = !isPip && !isPipReturning
-                    it.setShowPreviousButton(false)
-                    it.setShowNextButton(false)
                     it.setControllerShowTimeoutMs(3_000)
                     it.findViewById<View>(androidx.media3.ui.R.id.exo_center_controls)?.apply {
                         val controlsScale = if (fullscreen) 1f else 0.72f
@@ -2211,7 +2338,9 @@ private fun NativePlayer(
                         fullscreen = fullscreen,
                         onBack = onBack,
                         onCast = ::openCastPicker,
-                        onSettings = { showPlaybackSettings = true },
+                        onSpeed = { showSpeedSettings = true },
+                        onAudio = { showAudioSettings = true },
+                        showAudio = audioTrackCount > 1,
                         onCache = ::requestCache,
                         onPip = enterPip,
                         onFullscreen = onFullscreenToggle,
@@ -2222,6 +2351,8 @@ private fun NativePlayer(
                 },
                 onRelease = {
                     (it as? GesturePlayerView)?.onGestureFeedback = null
+                    (it as? GesturePlayerView)?.onControllerChromeProgress = null
+                    (it as? GesturePlayerView)?.onFullscreenChromeInsetChanged = null
                     gestureFeedbackDismissJob?.cancel()
                     gestureFeedbackDismissJob = null
                     if (playerView === it) playerView = null
@@ -2265,27 +2396,36 @@ private fun NativePlayer(
                     }) { Text("重试") }
                 }
             }
-            if (!isPip && !isPipReturning && controlsVisible) {
+            if (!isPip && !isPipReturning && controllerChromeProgress > 0f) {
                 Row(
                     Modifier
                         .align(if (fullscreen) Alignment.TopCenter else Alignment.TopEnd)
                         .zIndex(4f)
-                        .then(if (fullscreen) Modifier.fillMaxWidth() else Modifier)
+                        .graphicsLayer {
+                            alpha = controllerChromeProgress
+                            translationY = -(1f - controllerChromeProgress) * 16.dp.toPx()
+                        }
+                        .then(
+                            if (fullscreen) {
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = fullscreenHorizontalPadding)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .height(if (fullscreen) 56.dp else 48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (fullscreen) PlayerActionIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                    if (fullscreen) {
+                        PlayerActionIcon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            "返回",
+                            containerSize = 48.dp,
+                            iconOffsetX = 1.dp,
+                        )
+                    }
                     if (fullscreen) Text(title, color = androidx.compose.ui.graphics.Color.White, modifier = Modifier.weight(1f), maxLines = 1)
-                    PlayerActionIcon(Icons.Default.Cast, "DLNA 投屏", enabled = playing != null)
-                    PlayerActionIcon(Icons.Default.Settings, "速度与音轨")
-                }
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .zIndex(4f)
-                        .height(60.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
                     PlayerActionIcon(
                         if (cachedEpisode?.completed == true) Icons.Default.DownloadDone else Icons.Default.Download,
                         when {
@@ -2295,12 +2435,11 @@ private fun NativePlayer(
                         },
                         enabled = playing != null && cachedEpisode == null,
                     )
-                    PlayerActionIcon(Icons.Default.PictureInPicture, "画中画")
-                    PlayerActionIcon(
-                        Icons.Default.Fullscreen,
-                        "横竖屏切换",
-                        iconSize = 30.dp,
-                    )
+                    PlayerActionIcon(Icons.Default.Cast, "DLNA 投屏", enabled = playing != null)
+                    if (audioTrackCount > 1) {
+                        PlayerActionIcon(Icons.Default.Headphones, "音轨")
+                    }
+                    PlayerActionIcon(Icons.Default.Speed, "播放速度")
                 }
             }
         }
@@ -2326,71 +2465,111 @@ private fun NativePlayer(
         )
     }
 
-    if (showPlaybackSettings) {
-        val audioGroups = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
-        AlertDialog(
-            onDismissRequest = { showPlaybackSettings = false },
-            title = { Text("速度与音轨") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("播放速度", style = MaterialTheme.typography.titleSmall)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
-                            FilterChip(
-                                selected = kotlin.math.abs(player.playbackParameters.speed - speed) < 0.01f,
-                                onClick = {
-                                    player.setPlaybackSpeed(speed)
-                                    showPlaybackSettings = false
-                                },
-                                label = { Text(if (speed == 1f) "正常" else "${speed}x") },
-                            )
-                        }
+    if (showSpeedSettings) {
+        Popup(
+            alignment = Alignment.TopEnd,
+            offset = IntOffset(
+                x = -with(density) { fullscreenHorizontalPadding.roundToPx() },
+                y = with(density) { 56.dp.roundToPx() },
+            ),
+            onDismissRequest = { showSpeedSettings = false },
+            properties = PopupProperties(focusable = true),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+            ) {
+                FlowRow(
+                    modifier = Modifier
+                        .widthIn(max = 300.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
+                        FilterChip(
+                            selected = kotlin.math.abs(player.playbackParameters.speed - speed) < 0.01f,
+                            onClick = {
+                                player.setPlaybackSpeed(speed)
+                                showSpeedSettings = false
+                            },
+                            label = { Text(if (speed == 1f) "正常" else "${speed}x") },
+                        )
                     }
-                    HorizontalDivider()
-                    Text("音轨", style = MaterialTheme.typography.titleSmall)
-                    if (audioGroups.isEmpty()) {
-                        Text("当前视频没有可切换的音轨", style = MaterialTheme.typography.bodyMedium)
-                    } else {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                }
+            }
+        }
+    }
+
+    if (showAudioSettings && audioTrackCount > 1) {
+        val audioGroups = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        Popup(
+            alignment = Alignment.TopEnd,
+            offset = IntOffset(
+                x = -with(density) { (fullscreenHorizontalPadding + 48.dp).roundToPx() },
+                y = with(density) { 56.dp.roundToPx() },
+            ),
+            onDismissRequest = { showAudioSettings = false },
+            properties = PopupProperties(focusable = true),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+            ) {
+                FlowRow(
+                    modifier = Modifier
+                        .widthIn(max = 300.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    FilterChip(
+                        selected = player.trackSelectionParameters.overrides
+                            .none { it.key.type == C.TRACK_TYPE_AUDIO },
+                        onClick = {
+                            player.trackSelectionParameters = player.trackSelectionParameters
+                                .buildUpon()
+                                .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                                .build()
+                            showAudioSettings = false
+                        },
+                        label = { Text("自动") },
+                    )
+                    var audioNumber = 0
+                    audioGroups.forEach { group ->
+                        repeat(group.length) { trackIndex ->
+                            if (!group.isTrackSupported(trackIndex)) return@repeat
+                            audioNumber += 1
+                            val format = group.getTrackFormat(trackIndex)
+                            val label = format.label?.takeIf(String::isNotBlank)
+                                ?: format.language?.takeIf { it.isNotBlank() && it != "und" }
+                                ?: if (audioNumber == 1) "默认音轨" else "音轨 $audioNumber"
                             FilterChip(
-                                selected = false,
+                                selected = group.isTrackSelected(trackIndex),
                                 onClick = {
                                     player.trackSelectionParameters = player.trackSelectionParameters
                                         .buildUpon()
                                         .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                                        .addOverride(
+                                            TrackSelectionOverride(
+                                                group.mediaTrackGroup,
+                                                trackIndex,
+                                            ),
+                                        )
                                         .build()
-                                    showPlaybackSettings = false
+                                    showAudioSettings = false
                                 },
-                                label = { Text("自动") },
+                                label = { Text(label) },
                             )
-                            var audioNumber = 0
-                            audioGroups.forEach { group ->
-                                repeat(group.length) { trackIndex ->
-                                    audioNumber += 1
-                                    val format = group.getTrackFormat(trackIndex)
-                                    val label = format.label?.takeIf(String::isNotBlank)
-                                        ?: format.language?.takeIf { it.isNotBlank() && it != "und" }
-                                        ?: if (audioNumber == 1) "默认音轨" else "音轨 $audioNumber"
-                                    FilterChip(
-                                        selected = group.isTrackSelected(trackIndex),
-                                        onClick = {
-                                            player.trackSelectionParameters = player.trackSelectionParameters
-                                                .buildUpon()
-                                                .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
-                                                .addOverride(TrackSelectionOverride(group.mediaTrackGroup, trackIndex))
-                                                .build()
-                                            showPlaybackSettings = false
-                                        },
-                                        label = { Text(label) },
-                                    )
-                                }
-                            }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { showPlaybackSettings = false }) { Text("关闭") } },
-        )
+            }
+        }
     }
 
     if (showCast) AlertDialog(
@@ -2429,12 +2608,16 @@ private fun PlayerActionIcon(
     description: String,
     enabled: Boolean = true,
     iconSize: androidx.compose.ui.unit.Dp = 24.dp,
+    containerSize: androidx.compose.ui.unit.Dp = 48.dp,
+    iconOffsetX: androidx.compose.ui.unit.Dp = 0.dp,
 ) {
-    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(containerSize), contentAlignment = Alignment.Center) {
         Icon(
             icon,
             description,
-            modifier = Modifier.size(iconSize),
+            modifier = Modifier
+                .size(iconSize)
+                .offset(x = iconOffsetX),
             tint = androidx.compose.ui.graphics.Color.White.copy(alpha = if (enabled) 1f else 0.45f),
         )
     }
