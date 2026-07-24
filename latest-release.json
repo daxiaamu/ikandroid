@@ -1,9 +1,9 @@
 {
-  "tag": "v1.1.0",
-  "versionName": "1.1.0",
-  "name": "爱看 1.1.0",
-  "notes": "## 更新内容\n\n- 新增莫奈动态取色开关与自定义主题色，支持自动、亮色和暗色外观。\n- 优化进入详情页时海报与影片名称的连续过渡，减少加载过程中的停顿感。\n- 点击当前导航项可回到页面顶部，已在顶部时刷新；双击可直接刷新。\n- 优化检查更新状态提示及设置页信息展示。\n",
-  "publishedAt": "2026-07-24T04:08:11Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.1.0",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.1.0/app-release.apk"
+  "tag": "v1.1.1",
+  "versionName": "1.1.1",
+  "name": "爱看 1.1.1",
+  "notes": "## 更新内容\n\n- 修复滑动调节播放进度后立即打开控制栏时，进度提示可能持续停留的问题。\n- 调整播放器全屏按钮的显示尺寸，使其与其他操作按钮更协调、更易识别。\n",
+  "publishedAt": "2026-07-24T04:43:19Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.1.1",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.1.1/app-release.apk"
 }
