@@ -1,9 +1,9 @@
 {
-  "tag": "v1.4.0",
-  "versionName": "1.4.0",
-  "name": "爱看 1.4.0",
-  "notes": "本次更新集中优化播放器控制与全屏观看体验：\n\n- 重新整理播放器控制栏，延长进度条区域，并统一按钮、时间与两侧留白的视觉对齐。\n- 倍速与音轨改为独立的轻量入口；仅在视频包含多条音轨时显示音轨按钮。\n- 优化全屏状态下的安全边距、触摸区域及上下控制栏同步显示与隐藏效果。\n- 画中画和系统媒体控制会根据当前剧集位置正确启用上一集、下一集操作。\n- 优化播放手势反馈与进度调节体验，减少控制按钮误触。\n- 修复退出全屏时可能反复横竖屏切换，以及部分全屏按钮状态异常的问题。\n",
-  "publishedAt": "2026-07-24T16:07:48Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.4.0",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.4.0/ikan-1.4.0.apk"
+  "tag": "v1.5.0",
+  "versionName": "1.5.0",
+  "name": "爱看 1.5.0",
+  "notes": "## 更新内容\n\n- 新增缓存节目导出 MP4，支持查看导出进度，文件保存至 `Download/ikandroid`\n- 完善缓存任务的暂停、继续、删除与状态恢复，缓存完成后可直接离线观看\n- 优化缓存速度与进度显示，修正已缓存数据重复计入速度的问题\n- 优化缓存列表左滑操作，导出与删除入口松手后自动吸附\n- 统一收藏、播放历史与缓存页面的紧凑列表布局和状态样式\n- 修复更新通知、播放器控制与部分界面细节问题\n",
+  "publishedAt": "2026-07-24T18:45:52Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.5.0",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.5.0/app-release.apk"
 }
