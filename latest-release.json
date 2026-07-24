@@ -1,9 +1,9 @@
 {
-  "tag": "v1.5.0",
-  "versionName": "1.5.0",
-  "name": "爱看 1.5.0",
-  "notes": "## 更新内容\n\n- 新增缓存节目导出 MP4，支持查看导出进度，文件保存至 `Download/ikandroid`\n- 完善缓存任务的暂停、继续、删除与状态恢复，缓存完成后可直接离线观看\n- 优化缓存速度与进度显示，修正已缓存数据重复计入速度的问题\n- 优化缓存列表左滑操作，导出与删除入口松手后自动吸附\n- 统一收藏、播放历史与缓存页面的紧凑列表布局和状态样式\n- 修复更新通知、播放器控制与部分界面细节问题\n",
-  "publishedAt": "2026-07-24T18:45:52Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.5.0",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.5.0/app-release.apk"
+  "tag": "v1.5.1",
+  "versionName": "1.5.1",
+  "name": "爱看 1.5.1",
+  "notes": "## 更新内容\n\n- 恢复播放缓冲的磁盘复用，再次进入看过的视频时可更快开始播放\n- 优化播放失败后的切换体验，选择其他视频、线路或剧集会立即移除旧的重试提示\n- 减轻播放器控制层遮罩，画面不再整体变暗，底部工具条改为单层渐变\n- 精简缓存列表状态显示，去掉重复的下载符号\n",
+  "publishedAt": "2026-07-24T22:18:55Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.5.1",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.5.1/app-release.apk"
 }
