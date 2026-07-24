@@ -1,9 +1,9 @@
 {
-  "tag": "v1.2.0",
-  "versionName": "1.2.0",
-  "name": "爱看 1.2.0",
-  "notes": "- 剧集支持自动播放下一集，并提前准备后续内容，切集等待更少。\n- 返回列表后再次进入同一集，可继续使用已加载的播放缓冲。\n- 分类列表补充上一页，翻页操作更加完整。\n- 莫奈配色可跟随当前壁纸变化，并优化冷启动时的主题衔接。\n- 优化列表与详情页之间的平滑过渡，遮挡关系更加自然。",
-  "publishedAt": "2026-07-24T05:59:33Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.2.0",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.2.0/app-release.apk"
+  "tag": "v1.2.1",
+  "versionName": "1.2.1",
+  "name": "爱看 1.2.1",
+  "notes": "- 统一播放器控制区域的视觉层次，操作界面更加简洁连贯。\n- 优化检查更新入口与状态反馈，操作含义更加清晰。",
+  "publishedAt": "2026-07-24T06:18:35Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.2.1",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.2.1/-1.2.1.apk"
 }
