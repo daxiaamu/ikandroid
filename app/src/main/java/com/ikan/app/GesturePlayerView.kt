@@ -259,12 +259,11 @@ class GesturePlayerView @JvmOverloads constructor(
         val playerLocation = IntArray(2)
         progress.getLocationOnScreen(progressLocation)
         getLocationOnScreen(playerLocation)
-        val extra = (32 * resources.displayMetrics.density).roundToInt()
         val rect = Rect(
             progressLocation[0] - playerLocation[0],
-            progressLocation[1] - playerLocation[1] - extra,
+            progressLocation[1] - playerLocation[1],
             progressLocation[0] - playerLocation[0] + progress.width,
-            progressLocation[1] - playerLocation[1] + progress.height + extra,
+            progressLocation[1] - playerLocation[1] + progress.height,
         )
         return rect.contains(x.roundToInt(), y.roundToInt())
     }

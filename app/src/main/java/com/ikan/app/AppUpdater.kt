@@ -109,7 +109,9 @@ class AppUpdater(private val context: Context) {
             .setTitle("爱看")
             .setDescription("正在下载更新，完成后将提示安装")
             .setMimeType(APK_MIME)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            // Keep the system-owned notification only while downloading. On completion our
+            // install notification takes over and can be cancelled immediately when opened.
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
         // Let DownloadManager own the file and expose it through a content URI. Writing a
         // DownloadManager entry into Android/data is rejected by some Android 15/16 builds.
         return manager.enqueue(request).also { id ->

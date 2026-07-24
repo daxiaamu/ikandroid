@@ -13,4 +13,17 @@
     <style name="Theme.IKan.Starting" parent="Theme.IKan">
         <item name="android:windowDisablePreview">true</item>
     </style>
+
+    <!-- Keep Media3's 48dp seek target centered on the visible progress bar. -->
+    <style name="ExoStyledControls.TimeBar">
+        <item name="bar_height">@dimen/exo_styled_progress_bar_height</item>
+        <item name="bar_gravity">center</item>
+        <item name="touch_target_height">@dimen/exo_styled_progress_touch_target_height</item>
+        <item name="scrubber_enabled_size">@dimen/exo_styled_progress_enabled_thumb_size</item>
+        <item name="scrubber_dragged_size">@dimen/exo_styled_progress_dragged_thumb_size</item>
+        <item name="android:layout_height">@dimen/exo_styled_progress_layout_height</item>
+    </style>
+
+    <!-- Centering moves the bar up by 24dp; this keeps its visible position unchanged. -->
+    <dimen name="exo_styled_progress_margin_bottom">28dp</dimen>
 </resources>
