@@ -24,8 +24,8 @@ android {
         applicationId = "com.ikan.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22
-        versionName = "1.4.0"
+        versionCode = 23
+        versionName = "1.5.0"
         val githubUrl = providers.gradleProperty("IKAN_GITHUB_URL").orElse("").get()
         val authorUrl = providers.gradleProperty("IKAN_AUTHOR_URL").orElse("").get()
         val updateJsonUrl = providers.gradleProperty("IKAN_UPDATE_JSON_URL")
@@ -114,6 +114,11 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.10.1")
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("androidx.media3:media3-session:1.10.1")
+    // Kept local because some build networks cannot reach Google Maven. These are the
+    // unmodified Apache-2.0 AndroidX Media3 1.10.1 AARs.
+    implementation(files("libs/media3-transformer-1.10.1.aar"))
+    implementation(files("libs/media3-effect-1.10.1.aar"))
+    implementation(files("libs/media3-muxer-1.10.1.aar"))
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")

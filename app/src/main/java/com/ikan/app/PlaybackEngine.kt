@@ -13,7 +13,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpEngineDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -23,14 +25,18 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.offline.Download
+import androidx.media3.exoplayer.offline.DefaultDownloadIndex
+import androidx.media3.exoplayer.offline.DefaultDownloaderFactory
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
+import androidx.media3.exoplayer.offline.DownloaderFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.ikan.app.model.PlayEpisode
 import com.ikan.app.model.PlayLine
 import com.ikan.app.model.Video
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
@@ -40,6 +46,8 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
 
 /** App-wide playback networking and segment cache. */
 @OptIn(UnstableApi::class)
@@ -65,9 +73,15 @@ class PlaybackEngine(context: Context) {
     private val httpEngineExecutor = Executors.newFixedThreadPool(4)
     private val downloadExecutor = AdaptiveDownloadExecutor(appContext)
     private val upstreamFactory: DataSource.Factory = createUpstreamFactory()
+    private val totalDownloadNetworkBytes = AtomicLong()
+    private val downloadNetworkBytes = ConcurrentHashMap<String, AtomicLong>()
+    private val hiddenRemovalIds = ConcurrentHashMap.newKeySet<String>()
     private val databaseProvider = StandaloneDatabaseProvider(appContext)
     private val mediaCache = SimpleCache(
-        File(appContext.filesDir, "offline-media"),
+        resolveDownloadContentDirectory(
+            internalFilesDir = appContext.filesDir,
+            externalFilesDir = appContext.getExternalFilesDir(null),
+        ),
         NoOpCacheEvictor(),
         databaseProvider,
     )
@@ -78,8 +92,24 @@ class PlaybackEngine(context: Context) {
         // turn every watched stream into an unbounded offline download.
         .setCacheWriteDataSinkFactory(null)
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    private val offlineCacheFactory = CacheDataSource.Factory()
+        .setCache(mediaCache)
+        .setUpstreamDataSourceFactory(null)
+    private val mediaExporter by lazy {
+        CachedMediaExporter(
+            appContext,
+            DefaultMediaSourceFactory(offlineCacheFactory),
+        )
+    }
     private val _downloads = MutableStateFlow<List<CachedEpisode>>(emptyList())
-    val downloads = _downloads.asStateFlow()
+    private val downloadsState = _downloads.asStateFlow()
+    val downloads: StateFlow<List<CachedEpisode>>
+        get() {
+            // Merely observing the flow must initialize Media3. Otherwise its persisted
+            // DownloadIndex is not restored until the first add/remove command.
+            downloadManager
+            return downloadsState
+        }
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pollingProgress = false
     private val downloadSpeedSamples = mutableMapOf<String, DownloadSpeedSample>()
@@ -90,10 +120,8 @@ class PlaybackEngine(context: Context) {
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
             appContext,
-            databaseProvider,
-            mediaCache,
-            upstreamFactory,
-            downloadExecutor,
+            DefaultDownloadIndex(databaseProvider),
+            createDownloaderFactory(),
         ).apply {
             maxParallelDownloads = 2
             minRetryCount = 4
@@ -113,6 +141,7 @@ class PlaybackEngine(context: Context) {
                 }
 
                 override fun onDownloadRemoved(downloadManager: DownloadManager, download: Download) {
+                    hiddenRemovalIds.remove(download.request.id)
                     refreshDownloads(downloadManager)
                 }
             })
@@ -210,7 +239,20 @@ class PlaybackEngine(context: Context) {
 
     fun removeDownload(id: String) {
         downloadManager
-        DownloadService.sendRemoveDownload(appContext, MediaDownloadService::class.java, id, true)
+        hiddenRemovalIds.add(id)
+        _downloads.value = _downloads.value.filterNot { it.id == id }
+        runCatching {
+            DownloadService.sendRemoveDownload(
+                appContext,
+                MediaDownloadService::class.java,
+                id,
+                true,
+            )
+        }.onFailure {
+            hiddenRemovalIds.remove(id)
+            refreshDownloads(downloadManager)
+            throw it
+        }
     }
 
     fun setDownloadPaused(id: String, paused: Boolean) {
@@ -226,8 +268,28 @@ class PlaybackEngine(context: Context) {
 
     fun removeAllDownloads() {
         downloadManager
-        DownloadService.sendRemoveAllDownloads(appContext, MediaDownloadService::class.java, true)
+        hiddenRemovalIds.addAll(_downloads.value.map { it.id })
+        _downloads.value = emptyList()
+        runCatching {
+            DownloadService.sendRemoveAllDownloads(
+                appContext,
+                MediaDownloadService::class.java,
+                true,
+            )
+        }.onFailure {
+            hiddenRemovalIds.clear()
+            refreshDownloads(downloadManager)
+            throw it
+        }
     }
+
+    fun exportDownload(
+        item: CachedEpisode,
+        onCompleted: (String) -> Unit,
+        onError: (String) -> Unit,
+    ): Boolean = mediaExporter.export(item, onCompleted, onError)
+
+    val exportState get() = mediaExporter.state
 
     private fun refreshDownloads(manager: DownloadManager) {
         _downloads.value = runCatching {
@@ -237,20 +299,29 @@ class PlaybackEngine(context: Context) {
                     it.state == Download.STATE_RESTARTING
             }
             val nowMs = SystemClock.elapsedRealtime()
-            val perDownloadSpeeds = sampleDownloadSpeeds(transferringDownloads, nowMs)
             downloadExecutor.observe(
-                totalBytes = transferringDownloads.sumOf { it.bytesDownloaded },
+                totalBytes = totalDownloadNetworkBytes.get(),
                 activeUrls = transferringDownloads.mapTo(mutableSetOf()) {
                     it.request.uri.toString()
                 },
                 nowMs = nowMs,
             )
             val performance = downloadExecutor.performance
+            val perDownloadSpeeds = sampleDownloadSpeeds(
+                activeDownloads = transferringDownloads,
+                nowMs = nowMs,
+            )
             manager.downloadIndex.getDownloads().use { cursor ->
                 buildList<Pair<CachedEpisode, Long>> {
                     while (cursor.moveToNext()) {
                         val indexed = cursor.download
                         val download = current[indexed.request.id] ?: indexed
+                        if (
+                            download.request.id in hiddenRemovalIds ||
+                            download.state == Download.STATE_REMOVING
+                        ) {
+                            continue
+                        }
                         val metadata = runCatching {
                             JSONObject(download.request.data.toString(Charsets.UTF_8))
                         }.getOrNull() ?: continue
@@ -270,7 +341,7 @@ class PlaybackEngine(context: Context) {
                                 contentLength = download.contentLength,
                                 speedBytesPerSecond = perDownloadSpeeds[download.request.id] ?: 0L,
                                 connections = performance.connections,
-                            ) to download.updateTimeMs,
+                            ) to download.startTimeMs,
                         )
                     }
                 }.sortedByDescending { it.second }.map { it.first }
@@ -285,15 +356,15 @@ class PlaybackEngine(context: Context) {
         val activeIds = activeDownloads.mapTo(mutableSetOf()) { it.request.id }
         downloadSpeedSamples.keys.retainAll(activeIds)
         return activeDownloads.associate { download ->
+            val networkBytes = downloadNetworkBytes[download.request.id]?.get() ?: 0L
             val previous = downloadSpeedSamples[download.request.id]
             val elapsed = previous?.let { nowMs - it.sampleTimeMs } ?: 0L
             val speed = if (
                 previous != null &&
                 elapsed >= 400L &&
-                download.bytesDownloaded >= previous.bytesDownloaded
+                networkBytes >= previous.networkBytes
             ) {
-                val instant =
-                    (download.bytesDownloaded - previous.bytesDownloaded) * 1_000L / elapsed
+                val instant = (networkBytes - previous.networkBytes) * 1_000L / elapsed
                 if (previous.smoothedBytesPerSecond == 0L) {
                     instant
                 } else {
@@ -304,7 +375,7 @@ class PlaybackEngine(context: Context) {
             }
             if (previous == null || elapsed >= 400L) {
                 downloadSpeedSamples[download.request.id] = DownloadSpeedSample(
-                    bytesDownloaded = download.bytesDownloaded,
+                    networkBytes = networkBytes,
                     sampleTimeMs = nowMs,
                     smoothedBytesPerSecond = speed,
                 )
@@ -347,6 +418,22 @@ class PlaybackEngine(context: Context) {
         return OkHttpDataSource.Factory(httpClient).setUserAgent(USER_AGENT)
     }
 
+    private fun createDownloaderFactory(): DownloaderFactory = DownloaderFactory { request ->
+        val taskBytes = downloadNetworkBytes.computeIfAbsent(request.id) { AtomicLong() }
+        val taskUpstreamFactory = DataSource.Factory {
+            upstreamFactory.createDataSource().also { dataSource ->
+                dataSource.addTransferListener(
+                    DownloadNetworkMeter(taskBytes, totalDownloadNetworkBytes),
+                )
+            }
+        }
+        val taskCacheFactory = CacheDataSource.Factory()
+            .setCache(mediaCache)
+            .setUpstreamDataSourceFactory(taskUpstreamFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        DefaultDownloaderFactory(taskCacheFactory, downloadExecutor).createDownloader(request)
+    }
+
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     private fun createHttpEngineFactory(): DataSource.Factory {
         val metadataDirectory = File(appContext.cacheDir, "http-engine").apply { mkdirs() }
@@ -365,8 +452,76 @@ class PlaybackEngine(context: Context) {
     }
 
     private data class DownloadSpeedSample(
-        val bytesDownloaded: Long,
+        val networkBytes: Long,
         val sampleTimeMs: Long,
         val smoothedBytesPerSecond: Long,
     )
+
+    private class DownloadNetworkMeter(
+        private val taskBytes: AtomicLong,
+        private val totalBytes: AtomicLong,
+    ) : TransferListener {
+
+        override fun onTransferInitializing(
+            source: DataSource,
+            dataSpec: DataSpec,
+            isNetwork: Boolean,
+        ) = Unit
+
+        override fun onTransferStart(
+            source: DataSource,
+            dataSpec: DataSpec,
+            isNetwork: Boolean,
+        ) = Unit
+
+        override fun onBytesTransferred(
+            source: DataSource,
+            dataSpec: DataSpec,
+            isNetwork: Boolean,
+            bytesTransferred: Int,
+        ) {
+            if (isNetwork && bytesTransferred > 0) {
+                val transferred = bytesTransferred.toLong()
+                taskBytes.addAndGet(transferred)
+                totalBytes.addAndGet(transferred)
+            }
+        }
+
+        override fun onTransferEnd(
+            source: DataSource,
+            dataSpec: DataSpec,
+            isNetwork: Boolean,
+        ) = Unit
+    }
+}
+
+/**
+ * Mirrors Media3's demo storage policy: prefer persistent app-specific external storage and
+ * fall back to internal files. Older builds used filesDir/offline-media, so attempt a cheap
+ * directory move first; if the platform cannot move it across storage volumes, keep using the
+ * existing directory rather than copying gigabytes during cold start or losing downloads.
+ */
+internal fun resolveDownloadContentDirectory(
+    internalFilesDir: File,
+    externalFilesDir: File?,
+): File {
+    val legacyDirectory = File(internalFilesDir, "offline-media")
+    val preferredDirectory = File(externalFilesDir ?: internalFilesDir, "downloads")
+    if (legacyDirectory.absolutePath == preferredDirectory.absolutePath) {
+        return preferredDirectory
+    }
+    if (preferredDirectory.exists()) {
+        return preferredDirectory
+    }
+    val legacyHasContent = legacyDirectory.listFiles()?.isNotEmpty() == true
+    if (!legacyHasContent) {
+        legacyDirectory.delete()
+        return preferredDirectory
+    }
+    preferredDirectory.parentFile?.mkdirs()
+    return if (legacyDirectory.renameTo(preferredDirectory)) {
+        preferredDirectory
+    } else {
+        legacyDirectory
+    }
 }

@@ -30,6 +30,13 @@ data class UpdateInfo(
     val apkUrl: String,
 )
 
+data class UpdateDownloadProgress(
+    val fraction: Float?,
+    val active: Boolean,
+    val successful: Boolean,
+    val failureReason: Int?,
+)
+
 class AppUpdater(private val context: Context) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
@@ -116,6 +123,59 @@ class AppUpdater(private val context: Context) {
         // DownloadManager entry into Android/data is rejected by some Android 15/16 builds.
         return manager.enqueue(request).also { id ->
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong(KEY_DOWNLOAD, id).apply()
+        }
+    }
+
+    fun activeDownloadId(): Long? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong(KEY_DOWNLOAD, -1L)
+            .takeIf { it >= 0L }
+
+    suspend fun downloadProgress(downloadId: Long): UpdateDownloadProgress? =
+        withContext(Dispatchers.IO) {
+            val manager = context.getSystemService(DownloadManager::class.java)
+            runCatching {
+                manager.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
+                    if (!cursor.moveToFirst()) return@use null
+                    val status = cursor.getInt(
+                        cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS),
+                    )
+                    val downloaded = cursor.getLong(
+                        cursor.getColumnIndexOrThrow(
+                            DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
+                        ),
+                    )
+                    val total = cursor.getLong(
+                        cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES),
+                    )
+                    UpdateDownloadProgress(
+                        fraction = if (total > 0L) {
+                            (downloaded.toDouble() / total.toDouble())
+                                .toFloat()
+                                .coerceIn(0f, 1f)
+                        } else {
+                            null
+                        },
+                        active = status == DownloadManager.STATUS_PENDING ||
+                            status == DownloadManager.STATUS_RUNNING ||
+                            status == DownloadManager.STATUS_PAUSED,
+                        successful = status == DownloadManager.STATUS_SUCCESSFUL,
+                        failureReason = if (status == DownloadManager.STATUS_FAILED) {
+                            cursor.getInt(
+                                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON),
+                            )
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }.getOrNull()
+        }
+
+    fun forgetDownload(downloadId: Long) {
+        val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (preferences.getLong(KEY_DOWNLOAD, -1L) == downloadId) {
+            preferences.edit().remove(KEY_DOWNLOAD).apply()
         }
     }
 

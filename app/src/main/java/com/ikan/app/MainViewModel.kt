@@ -85,6 +85,7 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList(),
     )
     val downloads get() = app.playbackEngine.downloads
+    val exportState get() = app.playbackEngine.exportState
 
     init { loadCategory(HomeCategory.RECOMMEND, useStartupPrefetch = true) }
 
@@ -191,6 +192,11 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
     fun setDownloadPaused(id: String, paused: Boolean) =
         app.playbackEngine.setDownloadPaused(id, paused)
     fun clearDownloads() = app.playbackEngine.removeAllDownloads()
+    fun exportDownload(
+        item: CachedEpisode,
+        onCompleted: (String) -> Unit,
+        onError: (String) -> Unit,
+    ) = app.playbackEngine.exportDownload(item, onCompleted, onError)
 
     fun clearHistory() = viewModelScope.launch { repository.clearHistory() }
     fun clearSearchHistory() = viewModelScope.launch { app.preferences.clearSearchHistory() }

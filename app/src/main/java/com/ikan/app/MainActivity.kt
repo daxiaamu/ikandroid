@@ -42,6 +42,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.pager.HorizontalPager
@@ -52,6 +59,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -89,7 +97,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.BrokenImage
-import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DarkMode
@@ -97,6 +104,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.History
@@ -129,7 +137,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -144,12 +151,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
@@ -203,7 +207,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -971,13 +977,41 @@ private fun IKanApp(
                         }
                         MainTab.CACHE -> {
                             val downloads by viewModel.downloads.collectAsStateWithLifecycle()
+                            val exportState by viewModel.exportState.collectAsStateWithLifecycle()
                             CacheScreen(
                                 downloads = downloads,
+                                exportState = exportState,
                                 modifier = Modifier.fillMaxSize(),
                                 navigationPadding = padding,
                                 onPlay = ::openCachedEpisode,
                                 onDelete = viewModel::removeDownload,
                                 onSetPaused = viewModel::setDownloadPaused,
+                                onExport = { item ->
+                                    val started = viewModel.exportDownload(
+                                        item,
+                                        onCompleted = { path ->
+                                            Toast.makeText(
+                                                activity,
+                                                "已导出到 $path",
+                                                Toast.LENGTH_LONG,
+                                            ).show()
+                                        },
+                                        onError = { message ->
+                                            Toast.makeText(
+                                                activity,
+                                                message,
+                                                Toast.LENGTH_LONG,
+                                            ).show()
+                                        },
+                                    )
+                                    if (started) {
+                                        Toast.makeText(
+                                            activity,
+                                            "正在导出，将保存到“Download/ikandroid”",
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                },
                                 onClear = viewModel::clearDownloads,
                                 listState = cacheListState,
                             )
@@ -2623,6 +2657,107 @@ private fun PlayerActionIcon(
     }
 }
 
+private val CompactMediaPosterWidth = 64.dp
+private val CompactMediaPosterWidthMedium = 76.dp
+private const val CompactMediaPosterRatio = 0.71f
+private val CompactMediaPosterShape = RoundedCornerShape(8.dp)
+private val CompactMediaContentSpacing = 16.dp
+
+@Composable
+private fun CompactMediaTitle(
+    title: String,
+    modifier: Modifier = Modifier,
+    maxLines: Int = 2,
+) {
+    Text(
+        title,
+        modifier = modifier,
+        style = MaterialTheme.typography.titleMedium.copy(
+            fontSize = 18.sp,
+            lineHeight = 24.sp,
+        ),
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun CompactMediaMetadataText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        color = color,
+        style = MaterialTheme.typography.bodyMedium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun CompactMediaListRow(
+    title: String,
+    poster: String,
+    cacheKey: String,
+    modifier: Modifier = Modifier,
+    posterModifier: Modifier = Modifier,
+    titleModifier: Modifier = Modifier,
+    posterWidth: Dp = CompactMediaPosterWidth,
+    supportingContent: @Composable ColumnScope.() -> Unit,
+    trailingContent: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Card(
+            modifier = posterModifier
+                .width(posterWidth)
+                .aspectRatio(CompactMediaPosterRatio),
+            shape = CompactMediaPosterShape,
+            elevation = CardDefaults.cardElevation(1.dp),
+        ) {
+            PosterImage(
+                poster,
+                title,
+                Modifier.fillMaxSize(),
+                cacheKey = cacheKey,
+            )
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = CompactMediaContentSpacing, end = 8.dp),
+        ) {
+            CompactMediaTitle(
+                title = title,
+                modifier = titleModifier,
+            )
+            supportingContent()
+        }
+        trailingContent?.invoke()
+    }
+}
+
+@Composable
+private fun ClearItemsButton(
+    onClick: () -> Unit,
+    contentDescription: String,
+) {
+    TextButton(onClick = onClick) {
+        Icon(
+            Icons.Default.DeleteSweep,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text("清空")
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LibraryScreen(
@@ -2657,14 +2792,11 @@ private fun LibraryScreen(
                             )
                         }
                     }
-                    if (onClear != null && entries.isNotEmpty()) TextButton(onClick = onClear) {
-                        Icon(
-                            Icons.Default.DeleteSweep,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
+                    if (onClear != null && entries.isNotEmpty()) {
+                        ClearItemsButton(
+                            onClick = onClear,
+                            contentDescription = "清空$title",
                         )
-                        Spacer(Modifier.width(4.dp))
-                        Text("清空")
                     }
                 },
             )
@@ -2712,42 +2844,24 @@ private fun LibraryScreen(
                     ) {
                         items(entries, key = { it.videoId }) { entry ->
                             val video = Video(entry.videoId, entry.title, entry.poster)
-                            Row(
+                            CompactMediaListRow(
+                                title = video.title,
+                                poster = video.poster,
+                                cacheKey = "poster-${video.id}",
                                 modifier = Modifier
-                                    .fillMaxWidth()
                                     .animateItem()
                                     .clickable { onVideo(video) },
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Card(
-                                    modifier = posterModifier(video)
-                                        .width(if (medium) 76.dp else 64.dp)
-                                        .aspectRatio(0.71f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    elevation = CardDefaults.cardElevation(1.dp),
-                                ) {
-                                    PosterImage(
-                                        video.poster,
-                                        video.title,
-                                        Modifier.fillMaxSize(),
-                                        cacheKey = "poster-${video.id}",
-                                    )
-                                }
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(start = 16.dp, end = 8.dp),
-                                ) {
-                                    Text(
-                                        video.title,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = titleModifier(video),
-                                    )
+                                posterModifier = posterModifier(video),
+                                titleModifier = titleModifier(video),
+                                posterWidth = if (medium) {
+                                    CompactMediaPosterWidthMedium
+                                } else {
+                                    CompactMediaPosterWidth
+                                },
+                                supportingContent = {
                                     LibraryEntryStatus(entry, entry.videoId in cachedVideoIds)
-                                }
-                            }
+                                },
+                            )
                         }
                     }
                 } else {
@@ -2784,34 +2898,51 @@ private fun LibraryScreen(
 private fun LibraryEntryStatus(entry: LibraryEntity, cached: Boolean) {
     if (entry.playedAt != null && entry.durationMs > 0) {
         val percent = (entry.positionMs * 100 / entry.durationMs).coerceIn(0, 100)
-        Text(
-            "${entry.episodeName.orEmpty()} · $percent%",
-            style = MaterialTheme.typography.bodyMedium,
-        )
+        CompactMediaMetadataText("${entry.episodeName.orEmpty()} · $percent%")
     }
     if (cached) {
-        Text(
-            "已缓存",
-            color = MaterialTheme.colorScheme.primary,
-            style = MaterialTheme.typography.bodyMedium,
-        )
+        CachedStatusText()
     }
+}
+
+@Composable
+private fun CachedStatusText(size: String? = null) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        CompactMediaMetadataText(
+            text = "已缓存",
+            color = MaterialTheme.colorScheme.primary,
+        )
+        size?.let {
+            CompactMediaMetadataText(
+                text = "· $it",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private enum class CacheRevealValue {
+    Closed,
+    Actions,
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun CacheScreen(
     downloads: List<CachedEpisode>,
+    exportState: MediaExportState?,
     modifier: Modifier,
     navigationPadding: androidx.compose.foundation.layout.PaddingValues,
     listState: LazyListState,
     onPlay: (CachedEpisode) -> Unit,
     onDelete: (String) -> Unit,
     onSetPaused: (String, Boolean) -> Unit,
+    onExport: (CachedEpisode) -> Unit,
     onClear: () -> Unit,
 ) {
     var confirmClear by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<CachedEpisode?>(null) }
+    val scope = rememberCoroutineScope()
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -2819,9 +2950,10 @@ private fun CacheScreen(
                 title = { Text("缓存") },
                 actions = {
                     if (downloads.isNotEmpty()) {
-                        IconButton(onClick = { confirmClear = true }) {
-                            Icon(Icons.Default.ClearAll, "清空全部缓存")
-                        }
+                        ClearItemsButton(
+                            onClick = { confirmClear = true },
+                            contentDescription = "清空全部缓存",
+                        )
                     }
                 },
             )
@@ -2840,112 +2972,154 @@ private fun CacheScreen(
                 Text("还没有缓存节目")
             }
         } else {
-            Box(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val medium = maxWidth >= 600.dp
+                val horizontalPadding = when {
+                    maxWidth >= 840.dp -> 32.dp
+                    medium -> 24.dp
+                    else -> 16.dp
+                }
                 LazyColumn(
                     Modifier
-                        .widthIn(max = 960.dp)
+                        .widthIn(max = 800.dp)
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp)
                         .align(Alignment.TopCenter),
                     state = listState,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = horizontalPadding,
+                        top = padding.calculateTopPadding() + 16.dp,
+                        end = horizontalPadding,
                         bottom = navigationPadding.calculateBottomPadding() + 16.dp,
                     ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(downloads, key = { it.id }) { item ->
-                        val dismissState = rememberSwipeToDismissBoxState()
-                        LaunchedEffect(dismissState.settledValue) {
-                            if (dismissState.settledValue == SwipeToDismissBoxValue.EndToStart) {
-                                pendingDelete = item
-                                dismissState.reset()
+                        val itemExportState = exportState?.takeIf { it.itemId == item.id }
+                        val density = LocalDensity.current
+                        val actionAreaWidth = 176.dp
+                        val actionAreaWidthPx = with(density) { actionAreaWidth.toPx() }
+                        val revealAnchors = remember(actionAreaWidthPx) {
+                            DraggableAnchors {
+                                CacheRevealValue.Closed at 0f
+                                CacheRevealValue.Actions at -actionAreaWidthPx
                             }
                         }
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            enableDismissFromStartToEnd = false,
-                            backgroundContent = {
-                                Box(
-                                    Modifier
-                                        .fillMaxSize()
-                                        .background(MaterialTheme.colorScheme.errorContainer)
-                                        .padding(end = 24.dp),
-                                    contentAlignment = Alignment.CenterEnd,
+                        val revealState = remember(item.id, revealAnchors) {
+                            AnchoredDraggableState(
+                                initialValue = CacheRevealValue.Closed,
+                                anchors = revealAnchors,
+                            )
+                        }
+                        val revealOverscrollEffect = rememberOverscrollEffect()
+                        val revealFlingBehavior = AnchoredDraggableDefaults.flingBehavior(
+                            revealState,
+                            { distance -> distance * 0.35f },
+                            tween<Float>(durationMillis = 180),
+                        )
+                        Box(Modifier.fillMaxWidth()) {
+                            Row(
+                                Modifier
+                                    .matchParentSize()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            revealState.animateTo(CacheRevealValue.Closed)
+                                        }
+                                        onExport(item)
+                                    },
+                                    enabled = item.completed,
+                                    modifier = Modifier
+                                        .width(88.dp)
+                                        .fillMaxHeight(),
                                 ) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        "删除缓存",
-                                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                                    )
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Default.FileUpload, "导出 MP4")
+                                        Text("导出")
+                                    }
                                 }
-                            },
-                        ) {
-                            ListItem(
-                                headlineContent = {
-                                    Text(
-                                        item.title,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                TextButton(
+                                    onClick = {
+                                        scope.launch {
+                                            revealState.animateTo(CacheRevealValue.Closed)
+                                        }
+                                        pendingDelete = item
+                                    },
+                                    modifier = Modifier
+                                        .width(88.dp)
+                                        .fillMaxHeight(),
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error,
+                                    ),
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Default.Delete, "删除缓存")
+                                        Text("删除")
+                                    }
+                                }
+                            }
+                            CompactMediaListRow(
+                                title = item.title,
+                                poster = item.poster,
+                                cacheKey = "poster-${item.videoId}",
+                                posterWidth = if (medium) {
+                                    CompactMediaPosterWidthMedium
+                                } else {
+                                    CompactMediaPosterWidth
                                 },
-                                supportingContent = {
-                                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                        Text("${item.lineName} · ${item.episodeName}")
-                                        Text(
-                                            cacheStatus(item),
-                                            style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier
+                                    .offset {
+                                        IntOffset(
+                                            x = revealState.requireOffset().roundToInt(),
+                                            y = 0,
                                         )
-                                        if (!item.completed && item.percent >= 0f) {
-                                            LinearProgressIndicator(
-                                                progress = {
-                                                    (item.percent / 100f).coerceIn(0f, 1f)
+                                    }
+                                    .anchoredDraggable(
+                                        state = revealState,
+                                        orientation = Orientation.Horizontal,
+                                        overscrollEffect = revealOverscrollEffect,
+                                        flingBehavior = revealFlingBehavior,
+                                    )
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .combinedClickable(
+                                        onClick = { onPlay(item) },
+                                        onLongClick = { pendingDelete = item },
+                                ),
+                                supportingContent = {
+                                    Column {
+                                        CompactMediaMetadataText(
+                                            "${item.lineName} · ${item.episodeName}",
+                                        )
+                                        if (itemExportState != null) {
+                                            CompactMediaMetadataText(
+                                                text = if (
+                                                    itemExportState.stage == MediaExportStage.Saving
+                                                ) {
+                                                    "正在保存 · Download/ikandroid"
+                                                } else {
+                                                    "正在导出 · Download/ikandroid"
                                                 },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                drawStopIndicator = {},
+                                                color = MaterialTheme.colorScheme.primary,
                                             )
+                                        } else if (item.completed) {
+                                            CachedStatusText(formatCacheSize(item.bytesDownloaded))
+                                        } else {
+                                            CacheStatusText(item)
                                         }
                                     }
                                 },
-                                leadingContent = {
-                                    PosterImage(
-                                        item.poster,
-                                        item.title,
-                                        Modifier
-                                            .width(64.dp)
-                                            .aspectRatio(0.71f)
-                                            .clip(RoundedCornerShape(6.dp)),
-                                        cacheKey = "poster-${item.videoId}",
-                                    )
-                                },
                                 trailingContent = {
-                                    val canChangeState =
-                                        !item.completed && item.state != Download.STATE_REMOVING
-                                    val resume =
-                                        item.paused || item.state == Download.STATE_FAILED
-                                    IconButton(
-                                        onClick = { onSetPaused(item.id, !resume) },
-                                        enabled = canChangeState,
-                                    ) {
-                                        Icon(
-                                            when {
-                                                item.completed -> Icons.Default.DownloadDone
-                                                resume -> Icons.Default.PlayArrow
-                                                else -> Icons.Default.Pause
-                                            },
-                                            when {
-                                                item.completed -> "已缓存"
-                                                resume -> "继续缓存"
-                                                else -> "暂停缓存"
-                                            },
-                                        )
+                                    if (itemExportState != null) {
+                                        ExportProgressControl(itemExportState)
+                                    } else {
+                                        CacheProgressControl(item, onSetPaused)
                                     }
                                 },
-                                modifier = Modifier.combinedClickable(
-                                    onClick = { onPlay(item) },
-                                    onLongClick = { pendingDelete = item },
-                                ),
                             )
                         }
-                        HorizontalDivider()
                     }
                 }
             }
@@ -2985,14 +3159,116 @@ private fun CacheScreen(
     }
 }
 
-private fun cacheStatus(item: CachedEpisode): String {
-    val size = when {
-        item.bytesDownloaded >= 1024L * 1024 * 1024 ->
-            "%.1f GB".format(item.bytesDownloaded / (1024f * 1024 * 1024))
-        item.bytesDownloaded >= 1024L * 1024 ->
-            "%.1f MB".format(item.bytesDownloaded / (1024f * 1024))
-        else -> "${item.bytesDownloaded / 1024} KB"
+@Composable
+private fun MediaProgressRing(
+    progress: Float?,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+) {
+    Box(
+        modifier = Modifier.size(52.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (progress == null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(46.dp),
+                strokeWidth = 3.dp,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+        } else {
+            CircularProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier.size(46.dp),
+                strokeWidth = 3.dp,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                gapSize = 0.dp,
+            )
+        }
+        content()
     }
+}
+
+@Composable
+private fun ExportProgressControl(state: MediaExportState) {
+    MediaProgressRing(state.progress.coerceIn(0, 100) / 100f) {
+        Text(
+            "${state.progress.coerceIn(0, 100)}%",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@Composable
+private fun CacheProgressControl(
+    item: CachedEpisode,
+    onSetPaused: (String, Boolean) -> Unit,
+) {
+    if (item.completed) {
+        MediaProgressRing(1f) {
+            Icon(
+                Icons.Default.DownloadDone,
+                contentDescription = "已缓存",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        return
+    }
+
+    val progress: Float? = if (item.percent >= 0f) {
+        item.percent / 100f
+    } else if (
+        item.state == Download.STATE_DOWNLOADING ||
+        item.state == Download.STATE_QUEUED ||
+        item.state == Download.STATE_RESTARTING
+    ) {
+        null
+    } else {
+        0f
+    }
+
+    MediaProgressRing(progress) {
+        val resume = item.paused || item.state == Download.STATE_FAILED
+        IconButton(
+            onClick = { onSetPaused(item.id, !resume) },
+            enabled = item.state != Download.STATE_REMOVING,
+        ) {
+            Icon(
+                if (resume) Icons.Default.PlayArrow else Icons.Default.Pause,
+                if (resume) "继续缓存" else "暂停缓存",
+            )
+        }
+    }
+}
+
+@Composable
+private fun CacheStatusText(item: CachedEpisode) {
+    if (item.state == Download.STATE_DOWNLOADING) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.Download,
+                contentDescription = "正在缓存",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            CompactMediaMetadataText(
+                text = cacheStatus(item)
+                    .removePrefix("缓存中")
+                    .trim()
+                    .trimStart('·')
+                    .trim(),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    } else {
+        CompactMediaMetadataText(cacheStatus(item))
+    }
+}
+
+private fun cacheStatus(item: CachedEpisode): String {
+    val size = formatCacheSize(item.bytesDownloaded)
     return when (item.state) {
         Download.STATE_COMPLETED -> "已缓存 · $size"
         Download.STATE_DOWNLOADING -> {
@@ -3004,16 +3280,22 @@ private fun cacheStatus(item: CachedEpisode): String {
                     " · ${item.speedBytesPerSecond / 1024} KB/s"
                 else -> ""
             }
-            val threads = item.connections.takeIf { it > 0 }?.let { " · ${it}线程" }.orEmpty()
-            "缓存中$progress · $size$threads$speed"
+            "缓存中$progress · $size$speed"
         }
         Download.STATE_QUEUED -> "等待缓存 · $size"
         Download.STATE_STOPPED -> "已暂停 · $size"
         Download.STATE_FAILED -> "缓存失败 · 已保留 $size"
-        Download.STATE_REMOVING -> "正在删除"
         Download.STATE_RESTARTING -> "正在重新开始"
         else -> size
     }
+}
+
+private fun formatCacheSize(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 ->
+        "%.1f GB".format(bytes / (1024f * 1024 * 1024))
+    bytes >= 1024L * 1024 ->
+        "%.1f MB".format(bytes / (1024f * 1024))
+    else -> "${bytes / 1024} KB"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3037,6 +3319,38 @@ private fun SettingsScreen(
     var colorDialog by remember { mutableStateOf(false) }
     var checkingUpdate by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+    var updateDownloadId by remember { mutableStateOf(updater.activeDownloadId()) }
+    var updateDownloadProgress by remember { mutableStateOf<Float?>(null) }
+
+    LaunchedEffect(updateDownloadId) {
+        val downloadId = updateDownloadId ?: return@LaunchedEffect
+        while (true) {
+            val progress = updater.downloadProgress(downloadId)
+            if (progress == null) {
+                updater.forgetDownload(downloadId)
+                updateDownloadId = null
+                updateDownloadProgress = null
+                return@LaunchedEffect
+            }
+            updateDownloadProgress = progress.fraction
+            when {
+                progress.active -> delay(400L)
+                progress.successful -> {
+                    updateDownloadId = null
+                    updateDownloadProgress = null
+                    return@LaunchedEffect
+                }
+                progress.failureReason != null -> {
+                    updater.forgetDownload(downloadId)
+                    updateDownloadId = null
+                    updateDownloadProgress = null
+                    snackbar.showSnackbar("更新下载失败，请稍后重试")
+                    return@LaunchedEffect
+                }
+                else -> delay(400L)
+            }
+        }
+    }
 
     fun open(url: String, missing: String) {
         if (url.isBlank()) scope.launch { snackbar.showSnackbar(missing) }
@@ -3129,16 +3443,36 @@ private fun SettingsScreen(
                 SettingsRow(
                     Icons.Default.SystemUpdate,
                     "版本",
-                    if (checkingUpdate) "正在检查更新…" else "当前版本 ${BuildConfig.VERSION_NAME}",
-                    clickable = !checkingUpdate,
+                    when {
+                        checkingUpdate -> "正在检查更新…"
+                        updateDownloadId != null -> updateDownloadProgress?.let {
+                            "正在下载更新 ${(it * 100).toInt()}%"
+                        } ?: "正在准备下载…"
+                        else -> "当前版本 ${BuildConfig.VERSION_NAME}"
+                    },
+                    clickable = !checkingUpdate && updateDownloadId == null,
                     trailingContent = {
-                        if (checkingUpdate) {
-                            CircularProgressIndicator(
+                        when {
+                            checkingUpdate -> CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 strokeWidth = 2.dp,
                             )
-                        } else {
-                            Text(
+                            updateDownloadId != null -> {
+                                val progress = updateDownloadProgress
+                                if (progress == null) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                } else {
+                                    CircularProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                }
+                            }
+                            else -> Text(
                                 "检查",
                                 color = MaterialTheme.colorScheme.primary,
                                 style = MaterialTheme.typography.labelLarge,
@@ -3229,7 +3563,9 @@ private fun SettingsScreen(
                         scope.launch { snackbar.showSnackbar("授权后请再次点击下载并安装") }
                     } else {
                         runCatching { updater.download(info) }
-                            .onSuccess {
+                            .onSuccess { downloadId ->
+                                updateDownloadId = downloadId
+                                updateDownloadProgress = null
                                 availableUpdate = null
                                 scope.launch { snackbar.showSnackbar("已开始下载，完成后将打开安装界面") }
                             }
