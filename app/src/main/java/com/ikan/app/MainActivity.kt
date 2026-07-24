@@ -25,6 +25,7 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateBounds
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -58,6 +59,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
@@ -149,6 +151,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
@@ -386,6 +389,11 @@ private fun IKanApp(
     val homeSectionPositions = remember { mutableMapOf<String, Pair<Int, Int>>() }
     val favoritesGridState = rememberLazyGridState()
     val historyGridState = rememberLazyGridState()
+    val transitionChromeAlpha by animateFloatAsState(
+        targetValue = if (detailId == null) 1f else 0f,
+        animationSpec = tween(320),
+        label = "页面前景透明度",
+    )
 
     fun openVideo(video: Video) {
         requestedCachedEpisode = null
@@ -422,17 +430,22 @@ private fun IKanApp(
                 )
             }
             val sharedTitleModifier: @Composable (Video) -> Modifier = { video ->
-                Modifier.sharedElement(
-                    sharedContentState = rememberSharedContentState("title-${video.id}"),
-                    animatedVisibilityScope = this@AnimatedContent,
-                    boundsTransform = { _, _ -> tween(320) },
-                    placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
-                )
+                Modifier
+                    .wrapContentWidth(Alignment.Start)
+                    .sharedBounds(
+                        sharedContentState = rememberSharedContentState("title-${video.id}"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ -> tween(320) },
+                        placeholderSize = SharedTransitionScope.PlaceholderSize.ContentSize,
+                        resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
+                            contentScale = ContentScale.FillWidth,
+                        ),
+                    )
             }
-            val navigationOverlayModifier = Modifier.renderInSharedTransitionScopeOverlay(
+            val transitionChromeModifier = Modifier.renderInSharedTransitionScopeOverlay(
                 zIndexInOverlay = 10f,
-                renderInOverlay = { detailId == null && isTransitionActive },
-            )
+                renderInOverlay = { isTransitionActive },
+            ).alpha(transitionChromeAlpha)
             if (id != null) {
                 DetailRoute(
                     videoId = id,
@@ -463,7 +476,7 @@ private fun IKanApp(
                 MainTabs(
                     selected = tab,
                     onSelected = { tab = it },
-                    navigationModifier = navigationOverlayModifier,
+                    navigationModifier = transitionChromeModifier,
                 ) { visibleTab, padding ->
                     when (visibleTab) {
                         MainTab.HOME -> HomeScreen(
@@ -472,6 +485,7 @@ private fun IKanApp(
                             ::openVideo,
                             sharedPosterModifier,
                             sharedTitleModifier,
+                            transitionChromeModifier,
                             homeListState,
                             homeGridState,
                             homeSectionPositions,
@@ -487,6 +501,7 @@ private fun IKanApp(
                                 onVideo = ::openVideo,
                                 posterModifier = sharedPosterModifier,
                                 titleModifier = sharedTitleModifier,
+                                transitionChromeModifier = transitionChromeModifier,
                                 gridState = favoritesGridState,
                             )
                         }
@@ -505,6 +520,7 @@ private fun IKanApp(
                                 },
                                 posterModifier = sharedPosterModifier,
                                 titleModifier = sharedTitleModifier,
+                                transitionChromeModifier = transitionChromeModifier,
                                 gridState = historyGridState,
                                 onClear = viewModel::clearHistory,
                                 cachedVideoIds = downloads.mapTo(mutableSetOf()) { it.videoId },
@@ -695,6 +711,7 @@ private fun HomeScreen(
     onVideo: (Video) -> Unit,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
+    transitionChromeModifier: Modifier,
     listState: LazyListState,
     gridState: LazyGridState,
     sectionPositions: MutableMap<String, Pair<Int, Int>>,
@@ -738,6 +755,12 @@ private fun HomeScreen(
                 .widthIn(max = 1400.dp)
                 .fillMaxSize()
                 .align(Alignment.TopCenter),
+        ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .then(transitionChromeModifier)
+                .background(MaterialTheme.colorScheme.background),
         ) {
         Text("爱看", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = horizontalPadding, top = 8.dp, bottom = 8.dp))
@@ -804,6 +827,7 @@ private fun HomeScreen(
                 )
             }
         }
+        }
         CatalogContent(
             state = catalog,
             onVideo = onVideo,
@@ -815,6 +839,7 @@ private fun HomeScreen(
             cardWidth = cardWidth,
             gridMinWidth = gridMinWidth,
             horizontalPadding = horizontalPadding,
+            transitionChromeModifier = transitionChromeModifier,
             onFilter = viewModel::loadPath,
             onNext = { path -> viewModel.loadPath(path, catalog.page?.title ?: category.label) },
             onRetry = { viewModel.loadCategory(category) },
@@ -835,6 +860,7 @@ private fun CatalogContent(
     cardWidth: androidx.compose.ui.unit.Dp,
     gridMinWidth: androidx.compose.ui.unit.Dp,
     horizontalPadding: androidx.compose.ui.unit.Dp,
+    transitionChromeModifier: Modifier,
     onFilter: (String, String) -> Unit,
     onNext: (String) -> Unit,
     onRetry: () -> Unit,
@@ -889,6 +915,7 @@ private fun CatalogContent(
                     gridState,
                     gridMinWidth,
                     horizontalPadding,
+                    transitionChromeModifier,
                     onFilter,
                     onNext,
                 )
@@ -907,6 +934,7 @@ private fun CatalogGrid(
     gridState: LazyGridState,
     gridMinWidth: androidx.compose.ui.unit.Dp,
     horizontalPadding: androidx.compose.ui.unit.Dp,
+    transitionChromeModifier: Modifier,
     onFilter: (String, String) -> Unit,
     onNext: (String) -> Unit,
 ) {
@@ -915,6 +943,8 @@ private fun CatalogGrid(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(transitionChromeModifier)
+                    .background(MaterialTheme.colorScheme.background)
                     .excludeFromTabSwipe("filters:${page.title}"),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = horizontalPadding),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -950,7 +980,7 @@ private fun CatalogGrid(
     }
 }
 
-private fun posterRequest(context: Context, url: String): ImageRequest {
+private fun posterRequest(context: Context, url: String, cacheKey: String): ImageRequest {
     val headers = NetworkHeaders.Builder()
         .set("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36")
     if (Uri.parse(url).host.orEmpty().contains("doubanio.com")) {
@@ -958,7 +988,8 @@ private fun posterRequest(context: Context, url: String): ImageRequest {
     }
     return ImageRequest.Builder(context)
         .data(url)
-        .memoryCacheKey("poster:$url")
+        .placeholderMemoryCacheKey(cacheKey)
+        .memoryCacheKey(cacheKey)
         .diskCacheKey("poster:$url")
         .httpHeaders(headers.build())
         .build()
@@ -969,10 +1000,11 @@ private fun PosterImage(
     url: String,
     description: String?,
     modifier: Modifier,
+    cacheKey: String = "poster-url:$url",
     contentScale: ContentScale = ContentScale.Crop,
 ) {
     val context = LocalContext.current
-    val request = remember(url) { posterRequest(context, url) }
+    val request = remember(url, cacheKey) { posterRequest(context, url, cacheKey) }
     var failed by remember(url) { mutableStateOf(false) }
     Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
         AsyncImage(
@@ -1002,7 +1034,12 @@ private fun VideoCard(
             elevation = CardDefaults.cardElevation(2.dp),
         ) {
             Box(Modifier.fillMaxWidth().aspectRatio(0.71f).background(MaterialTheme.colorScheme.surfaceVariant)) {
-                PosterImage(video.poster, video.title, Modifier.fillMaxSize())
+                PosterImage(
+                    video.poster,
+                    video.title,
+                    Modifier.fillMaxSize(),
+                    cacheKey = "poster-${video.id}",
+                )
             }
         }
         Text(
@@ -1321,6 +1358,7 @@ private fun DetailRoute(
                                     .aspectRatio(0.71f)
                                     .then(posterModifier(sourceVideo))
                                     .clip(RoundedCornerShape(8.dp)),
+                                cacheKey = "poster-${sourceVideo.id}",
                             )
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text(
@@ -1470,6 +1508,7 @@ private fun DetailInfoList(
                         .aspectRatio(0.71f)
                         .then(posterModifier(posterVideo))
                         .clip(RoundedCornerShape(8.dp)),
+                    cacheKey = "poster-${posterVideo.id}",
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(
@@ -1922,6 +1961,7 @@ private fun LibraryScreen(
     onVideo: (Video) -> Unit,
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
+    transitionChromeModifier: Modifier,
     gridState: LazyGridState,
     onClear: (() -> Unit)? = null,
     cachedVideoIds: Set<String> = emptySet(),
@@ -1930,6 +1970,7 @@ private fun LibraryScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
+                modifier = transitionChromeModifier,
                 title = { Text(title) },
                 actions = {
                     if (onClear != null && entries.isNotEmpty()) IconButton(onClick = onClear) {
@@ -2119,6 +2160,7 @@ private fun CacheScreen(
                                             .width(64.dp)
                                             .aspectRatio(0.71f)
                                             .clip(RoundedCornerShape(6.dp)),
+                                        cacheKey = "poster-${item.videoId}",
                                     )
                                 },
                                 trailingContent = {
