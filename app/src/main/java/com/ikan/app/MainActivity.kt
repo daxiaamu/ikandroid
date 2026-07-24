@@ -516,6 +516,10 @@ private fun IKanApp(
                 zIndexInOverlay = 10f,
                 renderInOverlay = { isTransitionActive },
             ).alpha(transitionChromeAlpha)
+            val detailTopBarModifier = Modifier.renderInSharedTransitionScopeOverlay(
+                zIndexInOverlay = 20f,
+                renderInOverlay = { isTransitionActive },
+            )
             if (id != null) {
                 DetailRoute(
                     videoId = id,
@@ -529,6 +533,7 @@ private fun IKanApp(
                     enterPip = enterPip,
                     configureAutoPip = configureAutoPip,
                     deferDetailContent = detailId != null && isTransitionActive,
+                    topBarModifier = detailTopBarModifier,
                     onBack = {
                         detailId = null
                         // Keep the outgoing detail tree alive until its poster/title have reached
@@ -1168,6 +1173,7 @@ private fun DetailRoute(
     enterPip: () -> Unit,
     configureAutoPip: (Boolean) -> Unit,
     deferDetailContent: Boolean,
+    topBarModifier: Modifier,
     onBack: () -> Unit,
 ) {
     val state by viewModel.detail.collectAsStateWithLifecycle()
@@ -1421,6 +1427,7 @@ private fun DetailRoute(
         Scaffold(
         topBar = {
             TopAppBar(
+                modifier = topBarModifier,
                 title = {
                     Text(
                         state.detail?.video?.title ?: sourceVideo?.title ?: "影片详情",
