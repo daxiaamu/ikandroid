@@ -24,8 +24,8 @@ android {
         applicationId = "com.ikan.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "1.5.0"
+        versionCode = 24
+        versionName = "1.5.1"
         val githubUrl = providers.gradleProperty("IKAN_GITHUB_URL").orElse("").get()
         val authorUrl = providers.gradleProperty("IKAN_AUTHOR_URL").orElse("").get()
         val updateJsonUrl = providers.gradleProperty("IKAN_UPDATE_JSON_URL")

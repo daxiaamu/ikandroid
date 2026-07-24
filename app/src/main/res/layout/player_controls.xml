@@ -6,14 +6,14 @@
         android:id="@id/exo_controls_background"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="@color/exo_black_opacity_60" />
+        android:background="@android:color/transparent" />
 
     <LinearLayout
         android:id="@id/exo_bottom_bar"
         android:layout_width="match_parent"
         android:layout_height="48dp"
         android:layout_gravity="bottom"
-        android:background="@color/exo_bottom_bar_background"
+        android:background="@drawable/player_bottom_controls_background"
         android:gravity="center_vertical"
         android:layoutDirection="ltr"
         android:orientation="horizontal"

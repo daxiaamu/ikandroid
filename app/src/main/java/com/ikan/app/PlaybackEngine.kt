@@ -16,6 +16,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpEngineDataSource
 import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -88,9 +89,9 @@ class PlaybackEngine(context: Context) {
     private val cacheFactory = CacheDataSource.Factory()
         .setCache(mediaCache)
         .setUpstreamDataSourceFactory(upstreamFactory)
-        // Explicit downloads are persistent. Normal playback reads them but does not silently
-        // turn every watched stream into an unbounded offline download.
-        .setCacheWriteDataSinkFactory(null)
+        // Playback and explicit downloads intentionally share one persistent cache. Keeping the
+        // write sink explicit prevents normal playback from accidentally becoming read-only again.
+        .setCacheWriteDataSinkFactory(CacheDataSink.Factory().setCache(mediaCache))
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     private val offlineCacheFactory = CacheDataSource.Factory()
         .setCache(mediaCache)

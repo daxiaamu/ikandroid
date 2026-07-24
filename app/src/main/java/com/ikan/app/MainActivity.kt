@@ -2186,6 +2186,12 @@ private fun NativePlayer(
     }
     var buffering by remember(player) { mutableStateOf(player.playbackState == Player.STATE_BUFFERING) }
     var playbackError by remember(player) { mutableStateOf<PlaybackException?>(player.playerError) }
+    LaunchedEffect(title, playing?.line?.id, playing?.episode?.url) {
+        // A playback failure belongs only to the request that produced it. Remove its overlay
+        // as soon as the user chooses another video, line or episode instead of waiting for the
+        // replacement stream to become ready.
+        playbackError = null
+    }
     var audioTrackCount by remember(player) {
         mutableStateOf(
             player.currentTracks.groups
@@ -2230,7 +2236,12 @@ private fun NativePlayer(
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 buffering = playbackState == Player.STATE_BUFFERING
-                if (playbackState == Player.STATE_READY) playbackError = null
+                if (
+                    playbackState == Player.STATE_BUFFERING ||
+                    playbackState == Player.STATE_READY
+                ) {
+                    playbackError = null
+                }
                 if (playbackState == Player.STATE_ENDED) currentOnPlaybackEnded()
             }
 
@@ -3243,25 +3254,14 @@ private fun CacheProgressControl(
 @Composable
 private fun CacheStatusText(item: CachedEpisode) {
     if (item.state == Download.STATE_DOWNLOADING) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Default.Download,
-                contentDescription = "正在缓存",
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            CompactMediaMetadataText(
-                text = cacheStatus(item)
-                    .removePrefix("缓存中")
-                    .trim()
-                    .trimStart('·')
-                    .trim(),
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
+        CompactMediaMetadataText(
+            text = cacheStatus(item)
+                .removePrefix("缓存中")
+                .trim()
+                .trimStart('·')
+                .trim(),
+            color = MaterialTheme.colorScheme.primary,
+        )
     } else {
         CompactMediaMetadataText(cacheStatus(item))
     }
