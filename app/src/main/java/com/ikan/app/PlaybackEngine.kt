@@ -83,6 +83,9 @@ class PlaybackEngine(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pollingProgress = false
     private val downloadSpeedSamples = mutableMapOf<String, DownloadSpeedSample>()
+    @Volatile private var playbackPlayer: ExoPlayer? = null
+    @Volatile var backgroundSessionRequested: Boolean = false
+        private set
 
     val downloadManager: DownloadManager by lazy {
         DownloadManager(
@@ -119,7 +122,28 @@ class PlaybackEngine(context: Context) {
         }
     }
 
-    fun createPlayer(): ExoPlayer {
+    fun obtainPlayer(): ExoPlayer = playbackPlayer ?: synchronized(this) {
+        playbackPlayer ?: createPlayer().also { playbackPlayer = it }
+    }
+
+    fun setBackgroundSessionRequested(requested: Boolean) {
+        backgroundSessionRequested = requested
+    }
+
+    fun stopPlayback() {
+        playbackPlayer?.stop()
+    }
+
+    fun releasePlayerIfSessionInactive() {
+        if (backgroundSessionRequested) return
+        synchronized(this) {
+            if (backgroundSessionRequested) return
+            playbackPlayer?.release()
+            playbackPlayer = null
+        }
+    }
+
+    private fun createPlayer(): ExoPlayer {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 15_000, // Keep enough media ready for unstable mobile networks.

@@ -18,6 +18,9 @@ class AppPreferences(private val context: Context) {
     private val dynamicColorKey = booleanPreferencesKey("dynamic_color")
     private val customThemeColorKey = intPreferencesKey("custom_theme_color")
     private val searchHistoryKey = stringPreferencesKey("search_history")
+    private val favoritesListLayoutKey = booleanPreferencesKey("favorites_list_layout")
+    private val historyListLayoutKey = booleanPreferencesKey("history_list_layout")
+    private val backgroundPlaybackKey = booleanPreferencesKey("background_playback")
 
     val theme: Flow<ThemeMode> = context.dataStore.data.map { preferences ->
         runCatching { ThemeMode.valueOf(preferences[themeKey] ?: ThemeMode.SYSTEM.name) }
@@ -28,6 +31,15 @@ class AppPreferences(private val context: Context) {
     }
     val customThemeColor: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[customThemeColorKey] ?: DEFAULT_THEME_COLOR
+    }
+    val favoritesListLayout: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[favoritesListLayoutKey] ?: false
+    }
+    val historyListLayout: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[historyListLayoutKey] ?: false
+    }
+    val backgroundPlayback: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[backgroundPlaybackKey] ?: false
     }
 
     val searchHistory: Flow<List<String>> = context.dataStore.data.map { preferences ->
@@ -47,6 +59,18 @@ class AppPreferences(private val context: Context) {
 
     suspend fun setCustomThemeColor(color: Int) {
         context.dataStore.edit { it[customThemeColorKey] = color }
+    }
+
+    suspend fun setFavoritesListLayout(enabled: Boolean) {
+        context.dataStore.edit { it[favoritesListLayoutKey] = enabled }
+    }
+
+    suspend fun setHistoryListLayout(enabled: Boolean) {
+        context.dataStore.edit { it[historyListLayoutKey] = enabled }
+    }
+
+    suspend fun setBackgroundPlayback(enabled: Boolean) {
+        context.dataStore.edit { it[backgroundPlaybackKey] = enabled }
     }
 
     suspend fun addSearch(query: String) {

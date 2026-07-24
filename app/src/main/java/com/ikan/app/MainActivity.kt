@@ -1,7 +1,9 @@
 package com.ikan.app
 
 import android.Manifest
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
 import android.app.WallpaperManager
 import android.content.Context
 import android.content.Intent
@@ -9,6 +11,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Rect
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -79,9 +82,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
@@ -89,10 +94,10 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInNew
@@ -101,8 +106,10 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
@@ -244,11 +251,20 @@ class MainActivity : ComponentActivity() {
     private var pipSourceRect: Rect? = null
     private var autoPipEnabled = false
     private var pipReturnJob: Job? = null
+    private var pipDismissJob: Job? = null
+    private var pipExitAwaitingResume = false
     private var playbackPlayer: ExoPlayer? = null
+    private var backgroundPlaybackEnabled = false
     private val warmPlayback = Runnable { obtainPlaybackPlayer() }
+    private val shortcutVideo = mutableStateOf<Video?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.action == ACTION_CLOSE_PIP) {
+            closePipPlayback()
+            return
+        }
+        handleRecentShortcut(intent)
         enableEdgeToEdge()
         getSharedPreferences(THEME_CACHE, Context.MODE_PRIVATE).let { cache ->
             if (cache.contains(WALLPAPER_SEED)) {
@@ -277,6 +293,8 @@ class MainActivity : ComponentActivity() {
             ) {
                 IKanApp(
                     viewModel = viewModel,
+                    shortcutVideo = shortcutVideo.value,
+                    onShortcutConsumed = { shortcutVideo.value = null },
                     isPip = pipState.value,
                     isPipReturning = pipReturningState.value,
                     enterPip = ::enterVideoPip,
@@ -289,9 +307,78 @@ class MainActivity : ComponentActivity() {
         window.decorView.postDelayed(warmPlayback, 700L)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_CLOSE_PIP) {
+            closePipPlayback()
+        } else {
+            handleRecentShortcut(intent)
+        }
+    }
+
+    private fun handleRecentShortcut(intent: Intent?) {
+        if (intent?.action != RecentVideoShortcuts.ACTION_OPEN_RECENT) return
+        val id = intent.getStringExtra(RecentVideoShortcuts.EXTRA_VIDEO_ID) ?: return
+        shortcutVideo.value = Video(
+            id = id,
+            title = intent.getStringExtra(RecentVideoShortcuts.EXTRA_VIDEO_TITLE).orEmpty(),
+            poster = intent.getStringExtra(RecentVideoShortcuts.EXTRA_VIDEO_POSTER).orEmpty(),
+        )
+        RecentVideoShortcuts.reportUsed(
+            this,
+            intent.getStringExtra(RecentVideoShortcuts.EXTRA_SHORTCUT_ID),
+        )
+    }
+
     fun obtainPlaybackPlayer(): ExoPlayer = playbackPlayer ?: synchronized(this) {
-        playbackPlayer ?: (application as IKanApplication).playbackEngine.createPlayer().also {
+        playbackPlayer ?: (application as IKanApplication).playbackEngine.obtainPlayer().also {
             playbackPlayer = it
+        }
+    }
+
+    fun updateBackgroundPlayback(enabled: Boolean) {
+        backgroundPlaybackEnabled = enabled
+        if (!enabled) BackgroundPlaybackService.stop(this)
+    }
+
+    fun syncBackgroundPlaybackSession(enabled: Boolean) {
+        backgroundPlaybackEnabled = enabled
+        if (enabled && playbackPlayer?.currentMediaItem != null) {
+            BackgroundPlaybackService.start(this)
+        } else {
+            BackgroundPlaybackService.stop(this)
+        }
+    }
+
+    fun stopBackgroundPlaybackSession() {
+        BackgroundPlaybackService.stop(this)
+    }
+
+    private fun closePipPlayback() {
+        pipExitAwaitingResume = false
+        (application as IKanApplication).playbackEngine.stopPlayback()
+        BackgroundPlaybackService.stop(this)
+        finishAndRemoveTask()
+    }
+
+    private fun stopPlaybackAfterPipDismissal() {
+        pipExitAwaitingResume = false
+        (application as IKanApplication).playbackEngine.stopPlayback()
+        BackgroundPlaybackService.stop(this)
+        finishAndRemoveTask()
+    }
+
+    fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                1202,
+            )
         }
     }
 
@@ -300,13 +387,24 @@ class MainActivity : ComponentActivity() {
         if (::wallpaperManager.isInitialized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             wallpaperManager.removeOnColorsChangedListener(wallpaperColorsListener)
         }
-        playbackPlayer?.release()
         playbackPlayer = null
+        (application as IKanApplication).playbackEngine.releasePlayerIfSessionInactive()
         super.onDestroy()
+    }
+
+    override fun onStop() {
+        if (pipExitAwaitingResume) {
+            stopPlaybackAfterPipDismissal()
+        } else if (!backgroundPlaybackEnabled && !isInPictureInPictureMode) {
+            playbackPlayer?.pause()
+        }
+        super.onStop()
     }
 
     override fun onResume() {
         super.onResume()
+        pipExitAwaitingResume = false
+        pipDismissJob?.cancel()
         // Some vendor systems update Monet overlays without dispatching a configuration that
         // Compose observes. Re-read the system palette whenever the app returns to foreground.
         paletteRevision.value++
@@ -350,20 +448,33 @@ class MainActivity : ComponentActivity() {
     private companion object {
         const val THEME_CACHE = "theme_cache"
         const val WALLPAPER_SEED = "wallpaper_seed"
+        const val ACTION_CLOSE_PIP = "com.ikan.app.action.CLOSE_PIP"
+        const val PIP_CLOSE_REQUEST_CODE = 1203
     }
 
     override fun onPictureInPictureModeChanged(inPip: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(inPip, newConfig)
         pipState.value = inPip
         pipReturnJob?.cancel()
+        pipDismissJob?.cancel()
         if (inPip) {
+            pipExitAwaitingResume = false
             pipReturningState.value = false
         } else {
+            pipExitAwaitingResume = true
             // Keep the video surface visually stable until the system has finished expanding PiP.
             pipReturningState.value = true
             pipReturnJob = lifecycleScope.launch {
                 delay(320)
                 pipReturningState.value = false
+            }
+            // ColorOS may keep the Activity stopped instead of dispatching the custom PiP close
+            // action. Returning to the app calls onResume; a dismissed window does not.
+            pipDismissJob = lifecycleScope.launch {
+                delay(900)
+                if (pipExitAwaitingResume && !hasWindowFocus()) {
+                    stopPlaybackAfterPipDismissal()
+                }
             }
         }
     }
@@ -393,6 +504,25 @@ class MainActivity : ComponentActivity() {
             builder
                 .setAutoEnterEnabled(autoPipEnabled)
                 .setSeamlessResizeEnabled(true)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val closeIntent = Intent(this, MainActivity::class.java)
+                .setAction(ACTION_CLOSE_PIP)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            val closePendingIntent = PendingIntent.getActivity(
+                this,
+                PIP_CLOSE_REQUEST_CODE,
+                closeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.setCloseAction(
+                RemoteAction(
+                    Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
+                    "停止播放",
+                    "停止播放并关闭小窗",
+                    closePendingIntent,
+                ),
+            )
         }
         return builder.build()
     }
@@ -456,6 +586,8 @@ private data class PlayerPresentation(
 @Composable
 private fun IKanApp(
     viewModel: MainViewModel,
+    shortcutVideo: Video?,
+    onShortcutConsumed: () -> Unit,
     isPip: Boolean,
     isPipReturning: Boolean,
     enterPip: () -> Unit,
@@ -471,9 +603,19 @@ private fun IKanApp(
     val homeGridState = rememberLazyGridState()
     val homeSectionPositions = remember { mutableMapOf<String, Pair<Int, Int>>() }
     val favoritesGridState = rememberLazyGridState()
+    val favoritesListState = rememberLazyListState()
     val historyGridState = rememberLazyGridState()
+    val historyListState = rememberLazyListState()
     val cacheListState = rememberLazyListState()
     val settingsListState = rememberLazyListState()
+    val favoritesListLayout by viewModel.favoritesListLayout.collectAsStateWithLifecycle()
+    val historyListLayout by viewModel.historyListLayout.collectAsStateWithLifecycle()
+    val backgroundPlayback by viewModel.backgroundPlayback.collectAsStateWithLifecycle()
+    val history by viewModel.history.collectAsStateWithLifecycle()
+    val activity = LocalContext.current as MainActivity
+    LaunchedEffect(backgroundPlayback) {
+        activity.updateBackgroundPlayback(backgroundPlayback)
+    }
     val transitionChromeAlpha by animateFloatAsState(
         targetValue = if (detailId == null) 1f else 0f,
         animationSpec = tween(320),
@@ -495,6 +637,19 @@ private fun IKanApp(
         viewModel.loadDetail(item.videoId)
     }
 
+    LaunchedEffect(shortcutVideo?.id) {
+        shortcutVideo?.let {
+            openVideo(it)
+            onShortcutConsumed()
+        }
+    }
+    val shortcutEntries = remember(history) {
+        history.take(4).map { Triple(it.videoId, it.title, it.poster) }
+    }
+    LaunchedEffect(shortcutEntries) {
+        RecentVideoShortcuts.sync(activity.applicationContext, history)
+    }
+
     fun isTabAtTop(tab: MainTab): Boolean = when (tab) {
         MainTab.HOME -> {
             if (viewModel.catalog.value.page?.sections?.isNotEmpty() == true) {
@@ -505,12 +660,20 @@ private fun IKanApp(
                     homeGridState.firstVisibleItemScrollOffset == 0
             }
         }
-        MainTab.FAVORITES ->
+        MainTab.FAVORITES -> if (favoritesListLayout) {
+            favoritesListState.firstVisibleItemIndex == 0 &&
+                favoritesListState.firstVisibleItemScrollOffset == 0
+        } else {
             favoritesGridState.firstVisibleItemIndex == 0 &&
                 favoritesGridState.firstVisibleItemScrollOffset == 0
-        MainTab.HISTORY ->
+        }
+        MainTab.HISTORY -> if (historyListLayout) {
+            historyListState.firstVisibleItemIndex == 0 &&
+                historyListState.firstVisibleItemScrollOffset == 0
+        } else {
             historyGridState.firstVisibleItemIndex == 0 &&
                 historyGridState.firstVisibleItemScrollOffset == 0
+        }
         MainTab.CACHE ->
             cacheListState.firstVisibleItemIndex == 0 &&
                 cacheListState.firstVisibleItemScrollOffset == 0
@@ -537,8 +700,16 @@ private fun IKanApp(
                             homeGridState.animateScrollToItem(0)
                         }
                     }
-                    MainTab.FAVORITES -> favoritesGridState.animateScrollToItem(0)
-                    MainTab.HISTORY -> historyGridState.animateScrollToItem(0)
+                    MainTab.FAVORITES -> if (favoritesListLayout) {
+                        favoritesListState.animateScrollToItem(0)
+                    } else {
+                        favoritesGridState.animateScrollToItem(0)
+                    }
+                    MainTab.HISTORY -> if (historyListLayout) {
+                        historyListState.animateScrollToItem(0)
+                    } else {
+                        historyGridState.animateScrollToItem(0)
+                    }
                     MainTab.CACHE -> cacheListState.animateScrollToItem(0)
                     MainTab.SETTINGS -> settingsListState.animateScrollToItem(0)
                 }
@@ -595,6 +766,7 @@ private fun IKanApp(
                     posterModifier = sharedPosterModifier,
                     titleModifier = sharedTitleModifier,
                     viewModel = viewModel,
+                    backgroundPlaybackEnabled = backgroundPlayback,
                     isPip = isPip,
                     isPipReturning = isPipReturning,
                     enterPip = enterPip,
@@ -648,10 +820,23 @@ private fun IKanApp(
                                 titleModifier = sharedTitleModifier,
                                 transitionChromeModifier = transitionChromeModifier,
                                 gridState = favoritesGridState,
+                                listState = favoritesListState,
+                                listLayout = favoritesListLayout,
+                                onToggleLayout = {
+                                    if (favoritesListLayout) {
+                                        favoritesGridState.requestScrollToItem(
+                                            favoritesListState.firstVisibleItemIndex,
+                                        )
+                                    } else {
+                                        favoritesListState.requestScrollToItem(
+                                            favoritesGridState.firstVisibleItemIndex,
+                                        )
+                                    }
+                                    viewModel.setFavoritesListLayout(!favoritesListLayout)
+                                },
                             )
                         }
                         MainTab.HISTORY -> {
-                            val history by viewModel.history.collectAsStateWithLifecycle()
                             val downloads by viewModel.downloads.collectAsStateWithLifecycle()
                             LibraryScreen(
                                 title = "播放历史",
@@ -667,6 +852,20 @@ private fun IKanApp(
                                 titleModifier = sharedTitleModifier,
                                 transitionChromeModifier = transitionChromeModifier,
                                 gridState = historyGridState,
+                                listState = historyListState,
+                                listLayout = historyListLayout,
+                                onToggleLayout = {
+                                    if (historyListLayout) {
+                                        historyGridState.requestScrollToItem(
+                                            historyListState.firstVisibleItemIndex,
+                                        )
+                                    } else {
+                                        historyListState.requestScrollToItem(
+                                            historyGridState.firstVisibleItemIndex,
+                                        )
+                                    }
+                                    viewModel.setHistoryListLayout(!historyListLayout)
+                                },
                                 onClear = viewModel::clearHistory,
                                 cachedVideoIds = downloads.mapTo(mutableSetOf()) { it.videoId },
                             )
@@ -688,6 +887,7 @@ private fun IKanApp(
                             theme = viewModel.theme.collectAsStateWithLifecycle().value,
                             dynamicColor = viewModel.dynamicColor.collectAsStateWithLifecycle().value,
                             customThemeColor = viewModel.customThemeColor.collectAsStateWithLifecycle().value,
+                            backgroundPlayback = backgroundPlayback,
                             listState = settingsListState,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -695,6 +895,10 @@ private fun IKanApp(
                             onTheme = viewModel::setTheme,
                             onDynamicColor = viewModel::setDynamicColor,
                             onCustomThemeColor = viewModel::setCustomThemeColor,
+                            onBackgroundPlayback = { enabled ->
+                                if (enabled) activity.requestNotificationPermission()
+                                viewModel.setBackgroundPlayback(enabled)
+                            },
                         )
                     }
                 }
@@ -1256,6 +1460,7 @@ private fun DetailRoute(
     posterModifier: @Composable (Video) -> Modifier,
     titleModifier: @Composable (Video) -> Modifier,
     viewModel: MainViewModel,
+    backgroundPlaybackEnabled: Boolean,
     isPip: Boolean,
     isPipReturning: Boolean,
     enterPip: () -> Unit,
@@ -1293,6 +1498,7 @@ private fun DetailRoute(
             // Keep the process-wide player and its already loaded buffer warm. Reopening the same
             // episode can resume immediately; a different episode replaces the item below.
             player.pause()
+            activity.stopBackgroundPlaybackSession()
         }
     }
 
@@ -1347,29 +1553,16 @@ private fun DetailRoute(
         downloads.firstOrNull { it.url == url }
     }
 
-    fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(
-                activity,
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                1202,
-            )
-        }
-    }
-
     fun cacheCurrentEpisode() {
         val current = activePlaying ?: return
-        requestNotificationPermission()
+        activity.requestNotificationPermission()
         viewModel.cacheEpisode(current.line, current.episode)
         Toast.makeText(activity, "已加入后台缓存", Toast.LENGTH_SHORT).show()
     }
 
     fun cacheCurrentLine() {
         val current = activePlaying ?: return
-        requestNotificationPermission()
+        activity.requestNotificationPermission()
         viewModel.cacheLine(current.line)
         Toast.makeText(activity, "已加入全集缓存，共 ${current.line.episodes.size} 集", Toast.LENGTH_SHORT).show()
     }
@@ -1452,21 +1645,28 @@ private fun DetailRoute(
         if (fullscreen) leaveFullscreen() else leaveDetail()
     }
 
-    LaunchedEffect(player, activePlaying?.episode?.url) {
+    LaunchedEffect(player, activePlaying?.episode?.url, backgroundPlaybackEnabled) {
         val current = activePlaying ?: return@LaunchedEffect
         endedEpisodeUrl = null
         val episodeIndex = current.line.episodes.indexOfFirst { it.url == current.episode.url }
         val playlistEpisodes = if (episodeIndex >= 0) current.line.episodes else listOf(current.episode)
         val targetIndex = episodeIndex.coerceAtLeast(0)
         val playlistItems = playlistEpisodes.map { episode ->
+            val video = state.detail?.video ?: sourceVideo
             MediaItem.Builder()
                 .setMediaId(episode.url)
                 .setUri(episode.url)
                 .setMimeType(MimeTypes.APPLICATION_M3U8)
                 .setMediaMetadata(
                     MediaMetadata.Builder()
-                        .setTitle(state.detail?.video?.title)
+                        .setTitle(video?.title)
                         .setSubtitle(episode.name)
+                        .setArtist(episode.name)
+                        .apply {
+                            video?.poster?.takeIf(String::isNotBlank)?.let { poster ->
+                                setArtworkUri(Uri.parse(poster))
+                            }
+                        }
                         .build(),
                 )
                 .build()
@@ -1486,6 +1686,7 @@ private fun DetailRoute(
             player.playbackState == Player.STATE_IDLE -> player.prepare()
         }
         player.playWhenReady = true
+        activity.syncBackgroundPlaybackSession(backgroundPlaybackEnabled)
     }
     val playerPresentation = rememberUpdatedState(
         PlayerPresentation(
@@ -1964,7 +2165,7 @@ private fun NativePlayer(
                         useController = !isPip && !isPipReturning
                         setShowPreviousButton(false)
                         setShowNextButton(false)
-                        setControllerShowTimeoutMs(if (fullscreen) 6_000 else 5_000)
+                        setControllerShowTimeoutMs(3_000)
                         findViewById<View>(androidx.media3.ui.R.id.exo_center_controls)?.apply {
                             val controlsScale = if (fullscreen) 1f else 0.72f
                             scaleX = controlsScale
@@ -1995,7 +2196,7 @@ private fun NativePlayer(
                     it.useController = !isPip && !isPipReturning
                     it.setShowPreviousButton(false)
                     it.setShowNextButton(false)
-                    it.setControllerShowTimeoutMs(if (fullscreen) 6_000 else 5_000)
+                    it.setControllerShowTimeoutMs(3_000)
                     it.findViewById<View>(androidx.media3.ui.R.id.exo_center_controls)?.apply {
                         val controlsScale = if (fullscreen) 1f else 0.72f
                         scaleX = controlsScale
@@ -2082,7 +2283,7 @@ private fun NativePlayer(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .zIndex(4f)
-                        .height(48.dp),
+                        .height(60.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     PlayerActionIcon(
@@ -2252,6 +2453,9 @@ private fun LibraryScreen(
     titleModifier: @Composable (Video) -> Modifier,
     transitionChromeModifier: Modifier,
     gridState: LazyGridState,
+    listState: LazyListState? = null,
+    listLayout: Boolean = false,
+    onToggleLayout: (() -> Unit)? = null,
     onClear: (() -> Unit)? = null,
     cachedVideoIds: Set<String> = emptySet(),
 ) {
@@ -2262,8 +2466,22 @@ private fun LibraryScreen(
                 modifier = transitionChromeModifier,
                 title = { Text(title) },
                 actions = {
-                    if (onClear != null && entries.isNotEmpty()) IconButton(onClick = onClear) {
-                        Icon(Icons.Default.ClearAll, "清空历史")
+                    if (onToggleLayout != null && entries.isNotEmpty()) {
+                        IconButton(onClick = onToggleLayout) {
+                            Icon(
+                                if (listLayout) Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
+                                if (listLayout) "切换为网格排列" else "切换为列表排列",
+                            )
+                        }
+                    }
+                    if (onClear != null && entries.isNotEmpty()) TextButton(onClick = onClear) {
+                        Icon(
+                            Icons.Default.DeleteSweep,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("清空")
                     }
                 },
             )
@@ -2293,46 +2511,107 @@ private fun LibraryScreen(
                     medium -> 24.dp
                     else -> 16.dp
                 }
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(gridMinWidth),
-                    state = gridState,
-                    modifier = Modifier
-                        .widthIn(max = 1400.dp)
-                        .fillMaxSize()
-                        .align(Alignment.TopCenter),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = horizontalPadding,
-                        top = padding.calculateTopPadding() + 16.dp,
-                        end = horizontalPadding,
-                        bottom = navigationPadding.calculateBottomPadding() + 16.dp,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                ) {
-                    items(entries, key = { it.videoId }) { entry ->
-                        Column(Modifier.animateItem()) {
-                            VideoCard(
-                                Video(entry.videoId, entry.title, entry.poster),
-                                onVideo,
-                                posterModifier = posterModifier,
-                                titleModifier = titleModifier,
-                            )
-                            if (entry.playedAt != null && entry.durationMs > 0) {
-                                val percent = (entry.positionMs * 100 / entry.durationMs).coerceIn(0, 100)
-                                Text("${entry.episodeName.orEmpty()} · $percent%", style = MaterialTheme.typography.labelSmall)
+                val contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = horizontalPadding,
+                    top = padding.calculateTopPadding() + 16.dp,
+                    end = horizontalPadding,
+                    bottom = navigationPadding.calculateBottomPadding() + 16.dp,
+                )
+                if (listLayout && listState != null) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .widthIn(max = 800.dp)
+                            .fillMaxSize()
+                            .align(Alignment.TopCenter),
+                        contentPadding = contentPadding,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(entries, key = { it.videoId }) { entry ->
+                            val video = Video(entry.videoId, entry.title, entry.poster)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .animateItem()
+                                    .clickable { onVideo(video) },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Card(
+                                    modifier = posterModifier(video)
+                                        .width(if (medium) 76.dp else 64.dp)
+                                        .aspectRatio(0.71f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    elevation = CardDefaults.cardElevation(1.dp),
+                                ) {
+                                    PosterImage(
+                                        video.poster,
+                                        video.title,
+                                        Modifier.fillMaxSize(),
+                                        cacheKey = "poster-${video.id}",
+                                    )
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(start = 16.dp, end = 8.dp),
+                                ) {
+                                    Text(
+                                        video.title,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = titleModifier(video),
+                                    )
+                                    LibraryEntryStatus(entry, entry.videoId in cachedVideoIds)
+                                }
                             }
-                            if (entry.videoId in cachedVideoIds) {
-                                Text(
-                                    "已缓存",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    style = MaterialTheme.typography.labelSmall,
+                        }
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(gridMinWidth),
+                        state = gridState,
+                        modifier = Modifier
+                            .widthIn(max = 1400.dp)
+                            .fillMaxSize()
+                            .align(Alignment.TopCenter),
+                        contentPadding = contentPadding,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        items(entries, key = { it.videoId }) { entry ->
+                            Column(Modifier.animateItem()) {
+                                VideoCard(
+                                    Video(entry.videoId, entry.title, entry.poster),
+                                    onVideo,
+                                    posterModifier = posterModifier,
+                                    titleModifier = titleModifier,
                                 )
+                                LibraryEntryStatus(entry, entry.videoId in cachedVideoIds)
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LibraryEntryStatus(entry: LibraryEntity, cached: Boolean) {
+    if (entry.playedAt != null && entry.durationMs > 0) {
+        val percent = (entry.positionMs * 100 / entry.durationMs).coerceIn(0, 100)
+        Text(
+            "${entry.episodeName.orEmpty()} · $percent%",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+    if (cached) {
+        Text(
+            "已缓存",
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
@@ -2560,11 +2839,13 @@ private fun SettingsScreen(
     theme: ThemeMode,
     dynamicColor: Boolean,
     customThemeColor: Int,
+    backgroundPlayback: Boolean,
     listState: LazyListState,
     modifier: Modifier,
     onTheme: (ThemeMode) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onCustomThemeColor: (Int) -> Unit,
+    onBackgroundPlayback: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -2630,7 +2911,27 @@ private fun SettingsScreen(
                 }
             }
             item { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
-            item { SettingsHeader("更新与关于") }
+            item { SettingsHeader("播放") }
+            item {
+                ListItem(
+                    headlineContent = { Text("后台播放") },
+                    supportingContent = {
+                        Text("离开 APP 后继续播放，并在通知栏与系统媒体区域显示控制")
+                    },
+                    leadingContent = { Icon(Icons.Default.PlayCircle, null) },
+                    trailingContent = {
+                        Switch(
+                            checked = backgroundPlayback,
+                            onCheckedChange = onBackgroundPlayback,
+                        )
+                    },
+                    modifier = Modifier.clickable {
+                        onBackgroundPlayback(!backgroundPlayback)
+                    },
+                )
+            }
+            item { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
+            item { SettingsHeader("关于") }
             item {
                 SettingsRow(
                     Icons.Default.Language,
@@ -2644,7 +2945,7 @@ private fun SettingsScreen(
             item {
                 SettingsRow(
                     Icons.Default.SystemUpdate,
-                    "检查更新",
+                    "版本",
                     if (checkingUpdate) "正在检查更新…" else "当前版本 ${BuildConfig.VERSION_NAME}",
                     clickable = !checkingUpdate,
                     trailingContent = {
@@ -2676,6 +2977,23 @@ private fun SettingsScreen(
                 }
             }
             item {
+                SettingsRow(
+                    Icons.Default.Share,
+                    "分享爱看",
+                    "通过系统分享面板推荐给朋友",
+                    trailingContent = {},
+                ) {
+                    val url = BuildConfig.GITHUB_URL.ifBlank {
+                        "https://github.com/daxiaamu/ikandroid"
+                    }
+                    val share = Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_SUBJECT, "爱看")
+                        .putExtra(Intent.EXTRA_TEXT, "爱看 Android：$url")
+                    context.startActivity(Intent.createChooser(share, "分享爱看"))
+                }
+            }
+            item {
                 SettingsRow(Icons.Default.Code, "GitHub 仓库", BuildConfig.GITHUB_URL.ifBlank { "尚未配置仓库地址" }, external = true) {
                     open(BuildConfig.GITHUB_URL, "请先配置 IKAN_GITHUB_URL")
                 }
@@ -2684,9 +3002,6 @@ private fun SettingsScreen(
                 SettingsRow(Icons.Default.Person, "作者主页", BuildConfig.AUTHOR_URL.ifBlank { "尚未配置作者主页" }, external = true) {
                     open(BuildConfig.AUTHOR_URL, "请先配置 IKAN_AUTHOR_URL")
                 }
-            }
-            item {
-                SettingsRow(Icons.Default.Info, "版本", BuildConfig.VERSION_NAME, clickable = false) { }
             }
         }
         }

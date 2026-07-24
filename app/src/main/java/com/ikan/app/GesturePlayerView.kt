@@ -62,6 +62,7 @@ class GesturePlayerView @JvmOverloads constructor(
     private val bottomActionsHitTarget by lazy {
         LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             addView(actionHitTarget("缓存") { onCacheAction?.invoke() })
             addView(actionHitTarget("画中画") { onPipAction?.invoke() })
             addView(actionHitTarget("横竖屏切换") { onFullscreenAction?.invoke() })
@@ -173,6 +174,7 @@ class GesturePlayerView @JvmOverloads constructor(
         if (!actionTargetsAttached) {
             actionTargetsAttached = true
             val button = dp(48)
+            val bottomBar = dp(60)
             addView(
                 topBackHitTarget,
                 LayoutParams(button, button, Gravity.TOP or Gravity.START),
@@ -183,7 +185,7 @@ class GesturePlayerView @JvmOverloads constructor(
             )
             addView(
                 bottomActionsHitTarget,
-                LayoutParams(button * 3, button, Gravity.BOTTOM or Gravity.END),
+                LayoutParams(button * 3, bottomBar, Gravity.BOTTOM or Gravity.END),
             )
         }
         topBackHitTarget.visibility = if (visible && fullscreen) View.VISIBLE else View.GONE
@@ -209,12 +211,13 @@ class GesturePlayerView @JvmOverloads constructor(
     private fun resolveAction(x: Float, y: Float): (() -> Unit)? {
         if (!actionTargetsVisible) return null
         val button = dp(48).toFloat()
+        val bottomBar = dp(60).toFloat()
         if (y <= button) {
             if (actionTargetsFullscreen && x <= button) return onBackAction
             if (x >= width - button) return onSettingsAction
             if (x >= width - button * 2) return onCastAction
         }
-        if (y >= height - button) {
+        if (y >= height - bottomBar) {
             if (x >= width - button) return onFullscreenAction
             if (x >= width - button * 2) return onPipAction
             if (x >= width - button * 3) return onCacheAction

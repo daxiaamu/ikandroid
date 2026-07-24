@@ -72,6 +72,15 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
     val customThemeColor = app.preferences.customThemeColor.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), 0xFF216DFF.toInt(),
     )
+    val favoritesListLayout = app.preferences.favoritesListLayout.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), false,
+    )
+    val historyListLayout = app.preferences.historyListLayout.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), false,
+    )
+    val backgroundPlayback = app.preferences.backgroundPlayback.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), false,
+    )
     val searchHistory = app.preferences.searchHistory.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList(),
     )
@@ -190,6 +199,12 @@ class MainViewModel(private val app: IKanApplication) : ViewModel() {
         viewModelScope.launch { app.preferences.setDynamicColor(enabled) }
     fun setCustomThemeColor(color: Int) =
         viewModelScope.launch { app.preferences.setCustomThemeColor(color) }
+    fun setFavoritesListLayout(enabled: Boolean) =
+        viewModelScope.launch { app.preferences.setFavoritesListLayout(enabled) }
+    fun setHistoryListLayout(enabled: Boolean) =
+        viewModelScope.launch { app.preferences.setHistoryListLayout(enabled) }
+    fun setBackgroundPlayback(enabled: Boolean) =
+        viewModelScope.launch { app.preferences.setBackgroundPlayback(enabled) }
 
     private fun readable(error: Throwable): String {
         val causes = generateSequence(error as Throwable?) { it.cause }.toList()
