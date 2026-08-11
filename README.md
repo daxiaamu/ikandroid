@@ -1,4 +1,6 @@
 <p align="center">
+
+[机场推荐：白月光，稳定高速](https://www.sibker.com/register?invite_code=2XQR1UUz)
   <img src="assets/hero.svg" alt="爱看影视——原生 Android 影视播放器" width="100%">
 </p>
 
