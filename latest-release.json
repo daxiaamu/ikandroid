@@ -3,7 +3,7 @@
   "versionCode": 47,
   "versionName": "1.10.12",
   "name": "爱看 1.10.12",
-  "notes": "优化分类、搜索与筛选切换后的页面定位。\n\n避免自动与手动检查更新重复弹窗。\n\n提升部分安卓版本的启动兼容性与稳定性。",
+  "notes": "优化分类、搜索与筛选切换后的页面定位。\n\n避免自动与手动检查更新重复弹窗。\n\n提升部分安卓版本的启动兼容性与稳定性。\n\n[机场推荐：白月光，稳定高速](https://www.sibker.com/register?invite_code=2XQR1UUz)",
   "publishedAt": "2026-08-10T21:19:31Z",
   "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.10.12",
   "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.10.12/ikandroid-1.10.12.apk",
