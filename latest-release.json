@@ -1,11 +1,11 @@
 {
-  "tag": "v1.11.2",
-  "versionCode": 50,
-  "versionName": "1.11.2",
-  "name": "爱看 1.11.2",
-  "notes": "优化详情页线路与选集布局，切换线路、展开分集和定位当前播放内容更加直观。\n\n根据手机、平板及窗口宽度自动调整每行集数，并据此决定线路的默认展开方式，兼顾电影换线效率与长剧集浏览体验。\n\n点击“切换”时会先展开目标线路；若没有对应集，可直接从展开内容中手动选择。\n\n优化分类、搜索与筛选切换后的页面定位，避免自动与手动检查更新重复弹窗。\n\n提升启动兼容性、版本升级兼容性、线路切换、当前集恢复及多集节目浏览的稳定性。\n\n[机场推荐：白月光，稳定高速](https://www.sibker.com/register?invite_code=2XQR1UUz)",
-  "publishedAt": "2026-08-12T21:33:05Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.11.2",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.11.2/ikandroid-1.11.2.apk",
+  "tag": "v1.11.3",
+  "versionCode": 51,
+  "versionName": "1.11.3",
+  "name": "爱看 1.11.3",
+  "notes": "新增逐集播放进度记忆。切换到其他分集后，再回到之前看过的分集，可从各自记录的位置继续观看。\n\n自动播放下一集、手动切集和同一集切换线路均会正确继承对应进度；并优化缓冲状态下的进度保存，减少意外从头播放。\n\n优化当前线路与分集的定位入口，操作含义更加直观。\n\n[机场推荐：白月光，稳定高速](https://www.sibker.com/register?invite_code=2XQR1UUz)\n",
+  "publishedAt": "2026-08-12T22:34:54Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.11.3",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.11.3/ikandroid-1.11.3.apk",
   "maxForcedVersionCode": 0
 }
