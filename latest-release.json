@@ -1,11 +1,11 @@
 {
-  "tag": "v1.11.3",
-  "versionCode": 51,
-  "versionName": "1.11.3",
-  "name": "爱看 1.11.3",
-  "notes": "新增逐集播放进度记忆。切换到其他分集后，再回到之前看过的分集，可从各自记录的位置继续观看。\n\n自动播放下一集、手动切集和同一集切换线路均会正确继承对应进度；并优化缓冲状态下的进度保存，减少意外从头播放。\n\n优化当前线路与分集的定位入口，操作含义更加直观。\n\n[机场推荐：白月光，稳定高速](https://www.sibker.com/register?invite_code=2XQR1UUz)\n",
-  "publishedAt": "2026-08-12T22:34:54Z",
-  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.11.3",
-  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.11.3/ikandroid-1.11.3.apk",
+  "tag": "v1.11.4",
+  "versionCode": 52,
+  "versionName": "1.11.4",
+  "name": "爱看 1.11.4",
+  "notes": "- 优化全屏播放器的控件布局与触摸体验，按钮位置更整齐，操作更加稳定。\n- 竖屏视频进入全屏后保持竖屏观看，避免不必要的横屏旋转。\n- 修复部分片源宽高比信息异常时画面尺寸不正确的问题。\n- 优化当前线路、当前集与下一集相关的播放操作。\n\n机场推荐：[白月光，稳定高速](https://www.sibker.com/register?invite_code=2XQR1UUz)",
+  "publishedAt": "2026-08-13T22:29:17Z",
+  "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.11.4",
+  "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.11.4/ikandroid-1.11.4.apk",
   "maxForcedVersionCode": 0
 }
