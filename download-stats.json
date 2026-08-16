@@ -1,15 +1,15 @@
 {
-  "totalDownloads": 5072,
+  "totalDownloads": 5107,
   "releases": [
     {
       "tag": "v1.11.5",
       "name": "爱看 1.11.5",
-      "downloads": 790
+      "downloads": 823
     },
     {
       "tag": "v1.11.4",
       "name": "爱看 1.11.4",
-      "downloads": 131
+      "downloads": 132
     },
     {
       "tag": "v1.11.3",
@@ -29,7 +29,7 @@
     {
       "tag": "v1.11.0",
       "name": "爱看 1.11.0",
-      "downloads": 41
+      "downloads": 42
     },
     {
       "tag": "v1.10.12",
@@ -121,7 +121,7 @@
       "id": "511876310",
       "tag": "v1.11.0",
       "name": "ikandroid-1.11.0.apk",
-      "downloadCount": 41
+      "downloadCount": 42
     },
     {
       "id": "512079293",
@@ -145,13 +145,13 @@
       "id": "513589775",
       "tag": "v1.11.4",
       "name": "ikandroid-1.11.4.apk",
-      "downloadCount": 131
+      "downloadCount": 132
     },
     {
       "id": "513953321",
       "tag": "v1.11.5",
       "name": "ikandroid-1.11.5.apk",
-      "downloadCount": 790
+      "downloadCount": 823
     }
   ]
 }
