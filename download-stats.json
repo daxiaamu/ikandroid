@@ -1,15 +1,15 @@
 {
-  "totalDownloads": 8336,
+  "totalDownloads": 8356,
   "releases": [
     {
       "tag": "v1.11.6",
       "name": "爱看 1.11.6",
-      "downloads": 430
+      "downloads": 448
     },
     {
       "tag": "v1.11.5",
       "name": "爱看 1.11.5",
-      "downloads": 3563
+      "downloads": 3565
     },
     {
       "tag": "v1.11.4",
@@ -156,13 +156,13 @@
       "id": "513953321",
       "tag": "v1.11.5",
       "name": "ikandroid-1.11.5.apk",
-      "downloadCount": 3563
+      "downloadCount": 3565
     },
     {
       "id": "540248711",
       "tag": "v1.11.6",
       "name": "ikandroid-1.11.6.apk",
-      "downloadCount": 430
+      "downloadCount": 448
     }
   ]
 }
