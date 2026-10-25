@@ -3,7 +3,7 @@
   "versionCode": 54,
   "versionName": "1.11.6",
   "name": "爱看 1.11.6",
-  "notes": "- 优化跨设备继续观看，准确恢复当前线路、分集与播放进度。\n- 修复接续播放后切换其他分集可能无响应的问题。\n- 恢复紧凑清晰的选集布局，并在“关于”中新增 ikanbot 猴油脚本入口。\n\n机场推荐：[白月光，稳定高速](https://www.sibker.com/register?invite_code=2XQR1UUz)\r\n",
+  "notes": "- 优化跨设备继续观看，准确恢复当前线路、分集与播放进度。\n- 修复接续播放后切换其他分集可能无响应的问题。\n- 恢复紧凑清晰的选集布局，并在“关于”中新增 ikanbot 猴油脚本入口。\n\n[Android 开心版软件下载](https://pan.quark.cn/s/14e8a6044f77)\r\n",
   "publishedAt": "2026-09-01T22:46:51Z",
   "releaseUrl": "https://github.com/daxiaamu/ikandroid/releases/tag/v1.11.6",
   "apkUrl": "https://github.com/daxiaamu/ikandroid/releases/download/v1.11.6/ikandroid-1.11.6.apk",
